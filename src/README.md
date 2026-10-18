@@ -1,8 +1,8 @@
 # Censor proxy
 
 A mitmproxy-based HTTP/HTTPS proxy that blurs female explicit regions in images
-before the browser renders them. See [`../docs`](../docs) for the handoff and
-the [design decisions](../docs/decisions.md).
+before the browser renders them. See [`../docs`](../docs) for the handoff,
+the [design decisions](../docs/decisions.md) and [status](../docs/status.md).
 
 ## Run
 
@@ -21,7 +21,8 @@ curl -x http://127.0.0.1:8080 http://censor.local/health
 ## Point the system at it
 
 Use the PAC file rather than a fixed proxy so browsing falls back to a direct
-connection when the container is stopped:
+connection when the container is stopped (not yet tested; Chromium may refuse
+a `file://` PAC URL from system settings):
 
 ```bash
 gsettings set org.gnome.system.proxy mode auto
@@ -87,15 +88,19 @@ records hostnames; `debug` adds full URLs and every image scanned.
 
 Draws every detection on each sample (red = censored, grey = passed) next to
 the proxy's actual output, and writes `review/index.html` and
-`review/detections.json`:
+`review/detections.json`. It uses the default model (320n) unless given a
+config; this reviews with 640m:
+
+```bash
+mkdir -p ../review && printf 'model: {path: /app/models/640m.onnx, resolution: 640}\n' > ../review/config.yaml
+```
 
 ```bash
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/w" -w /w/src censor-proxy \
-  python tools/draw_boxes.py /w/docs/samples /w/review
+  python tools/draw_boxes.py /w/docs/samples /w/review --config /w/review/config.yaml
 ```
 
-Add `--config FILE` to review with a different model. Once the boxes are
-confirmed, copy `review/detections.json` to
+Once the boxes are confirmed, copy `review/detections.json` to
 `tests/fixtures/expected-<model>.json` (`640m` or `320n`) to make it that
 model's regression fixture; `tests/test_samples.py` checks each fixture with
 its own model, whatever the configured default.
@@ -107,5 +112,8 @@ docker run --rm -v "$PWD/..:/w" -w /w/src censor-proxy \
   sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q -p no:cacheprovider"
 ```
 
-Unit tests use a fake detector and need no weights. `tests/test_samples.py` runs
-the real model against the confirmed fixture and is skipped until it exists.
+Rebuild the image first if `requirements.txt` changed; the code itself is
+mounted. Unit tests use a fake detector and need no weights.
+`tests/test_samples.py` runs each model against its confirmed fixture and needs
+the sample images in `docs/samples/` (not in git); known failures show as
+xfail.

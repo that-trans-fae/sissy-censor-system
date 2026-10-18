@@ -1,0 +1,39 @@
+# Status
+
+Where the project stands against the handoff plan. Update this when a piece
+of work lands or the plan changes.
+
+Last updated Oct 18, 2026.
+
+## Done (Phase 1)
+
+- Docker image (`src/Dockerfile`, `src/compose.yaml`) with mitmproxy, NudeNet
+  320n (default) and 640m weights baked in
+- `censor.py` addon: Content-Type routing, passthrough hosts, size floor,
+  `censor.local/health`, fail-closed on errors and timeouts
+- `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
+  sampling and a content-hash cache
+- Female-only selection rule with context thresholds (see `decisions.md`)
+- YAML config over documented defaults; JSONL detection log
+- Box-draw review tool, unit tests, per-model sample fixtures
+- Chromium (snap): CA trusted via policy, verified on live HTTPS in a test
+  profile
+
+## Not done yet
+
+- **Data URIs**: base64 images inlined in HTML, CSS and JSON (in scope for
+  v1, handoff pipeline "Text bodies")
+- **System-wide proxy**: GNOME proxy setting with `src/proxy.pac`, and a check
+  that browsing falls back to direct when the container is down. Chromium may
+  not accept a `file://` PAC URL from system settings; if not, serve it over
+  HTTP.
+- **Firefox (snap)**: CA trust and proxy settings
+- **Tuning from real browsing**: thresholds were tuned on 15 samples; review
+  `src/logs/detections.jsonl` for misses and false positives
+
+## Later phases (from the handoff)
+
+- Phase 3: InsightFace fallback for covered-but-suggestive content (out of
+  scope for now: exposed anatomy only)
+- Phase 4: DOM observer for canvas and JS-built images; only if real browsing
+  shows sites slipping through
