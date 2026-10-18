@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import threading
 import time
 from collections import OrderedDict
@@ -137,7 +138,8 @@ class Censor:
         return result
 
     def _detect_frames(self, frames: list[np.ndarray]) -> list[tuple[int, list[Decision]]]:
-        step = self.cfg.images.frame_step
+        icfg = self.cfg.images
+        step = max(icfg.frame_step, math.ceil(len(frames) / icfg.max_detect_frames))
         sampled = list(range(0, len(frames), step))
         if sampled[-1] != len(frames) - 1:
             sampled.append(len(frames) - 1)

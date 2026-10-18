@@ -27,6 +27,7 @@ class ModelConfig:
     resolution: int
     workers: int
     threads_per_worker: int
+    tiling: bool
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,15 @@ class ImagesConfig:
     min_side_px: int
     max_bytes: int
     frame_step: int
+    max_detect_frames: int
     max_frames: int
+
+
+@dataclass(frozen=True)
+class DataUrisConfig:
+    enabled: bool
+    content_types: frozenset[str]
+    max_body_bytes: int
 
 
 @dataclass(frozen=True)
@@ -94,6 +103,7 @@ class Config:
     detection: DetectionConfig
     censor: CensorConfig
     images: ImagesConfig
+    data_uris: DataUrisConfig
     proxy: ProxyConfig
     cache: CacheConfig
     logging: LoggingConfig
@@ -136,6 +146,11 @@ def _build(raw: dict[str, Any]) -> Config:
         ),
         "censor": CensorConfig(**{**c, "fill_color": tuple(c["fill_color"])}),
         "images": ImagesConfig(**raw["images"]),
+        "data_uris": DataUrisConfig(
+            enabled=bool(raw["data_uris"]["enabled"]),
+            content_types=frozenset(t.lower() for t in raw["data_uris"]["content_types"] or ()),
+            max_body_bytes=int(raw["data_uris"]["max_body_bytes"]),
+        ),
         "proxy": ProxyConfig(
             passthrough_hosts=tuple(raw["proxy"]["passthrough_hosts"] or ()),
             health_host=raw["proxy"]["health_host"],
@@ -155,6 +170,8 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"logging.level must be one of {LOG_LEVELS}, got {cfg.logging.level!r}")
     if cfg.images.frame_step < 1:
         raise ConfigError("images.frame_step must be >= 1")
+    if cfg.images.max_detect_frames < 2:
+        raise ConfigError("images.max_detect_frames must be >= 2")
     if not 1 <= cfg.censor.quality <= 100:
         raise ConfigError("censor.quality must be between 1 and 100")
     if len(cfg.censor.fill_color) != 3:

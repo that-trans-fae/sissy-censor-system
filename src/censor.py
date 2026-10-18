@@ -1,4 +1,5 @@
-"""mitmproxy addon: censor female explicit regions in image responses.
+"""mitmproxy addon: censor female explicit regions in image responses and in
+base64 data-URI images embedded in text bodies.
 
 Run with:  mitmdump -s censor.py
 """
@@ -12,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mitmproxy import ctx, http
 
+from censor_proxy import datauri
 from censor_proxy.config import Config, load_config
 from censor_proxy.detection_log import DetectionLog
 from censor_proxy.imaging import Censor, ScanResult
@@ -53,23 +55,32 @@ class CensorAddon:
                 flow.response = http.Response.make(404)
 
     def responseheaders(self, flow: http.HTTPFlow) -> None:
-        # Runs after mitmproxy's StreamBodies addon. Buffer image bodies we
-        # intend to scan even if they exceed stream_large_bodies.
-        if self.cfg is None or not _is_image(flow):
+        # Runs after mitmproxy's StreamBodies addon. Buffer bodies we intend
+        # to scan even if they exceed stream_large_bodies.
+        if self.cfg is None:
+            return
+        if _is_image(flow):
+            limit = self.cfg.images.max_bytes
+        elif self._is_data_uri_text(flow):
+            limit = self.cfg.data_uris.max_body_bytes
+        else:
             return
         length = flow.response.headers.get("Content-Length", "")
-        if length.isdigit() and int(length) > self.cfg.images.max_bytes:
-            flow.response.stream = True
-        else:
-            flow.response.stream = False
+        flow.response.stream = length.isdigit() and int(length) > limit
 
     async def response(self, flow: http.HTTPFlow) -> None:
-        if self.censor is None or not _is_image(flow) or flow.response.stream:
+        if self.censor is None or flow.response is None or flow.response.stream:
             return
+        if _is_image(flow):
+            await self._censor_image(flow)
+        elif self._is_data_uri_text(flow):
+            await self._censor_text(flow)
+
+    async def _censor_image(self, flow: http.HTTPFlow) -> None:
         data = flow.response.content
         if not data:
             return
-        mime = flow.response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        mime = _mime(flow)
         loop = asyncio.get_running_loop()
         self.in_flight += 1
         try:
@@ -77,7 +88,7 @@ class CensorAddon:
                 loop.run_in_executor(self.pool, self.censor.censor_bytes, data, mime),
                 timeout=self.cfg.censor.timeout_seconds)
         except Exception as e:
-            reason = "timeout" if isinstance(e, TimeoutError) else f"error: {type(e).__name__}: {e}"
+            reason = _failure_reason(e)
             log.warning("detection failed for %s: %s", flow.request.pretty_host, reason)
             if self.cfg.censor.fail_closed:
                 result = await loop.run_in_executor(None, self.censor.fail_closed, data, reason)
@@ -87,12 +98,60 @@ class CensorAddon:
             self.in_flight -= 1
 
         if result.changed:
-            flow.response.content = result.data
-            # Integrity headers describe the original body. ETag and
-            # Last-Modified stay so the browser can keep caching the result.
-            for header in ("Content-MD5", "Digest", "Repr-Digest", "Content-Digest"):
-                flow.response.headers.pop(header, None)
+            _replace_body(flow, result.data)
         self.detections.record(result, flow.request.pretty_host, flow.request.pretty_url, mime)
+
+    async def _censor_text(self, flow: http.HTTPFlow) -> None:
+        body = flow.response.content
+        matches = datauri.find(body) if body else []
+        if not matches:
+            return
+        fail_closed = self.cfg.censor.fail_closed
+        loop = asyncio.get_running_loop()
+        self.in_flight += 1
+        try:
+            # Each image gets the per-image budget; one slow image shouldn't
+            # cost the rest of the page.
+            result = await asyncio.wait_for(
+                loop.run_in_executor(self.pool, lambda: datauri.censor_data_uris(
+                    body, self.censor, fail_closed=fail_closed, matches=matches)),
+                timeout=self.cfg.censor.timeout_seconds * len(matches))
+        except Exception as e:
+            reason = _failure_reason(e)
+            log.warning("data-URI detection failed for %s: %s", flow.request.pretty_host, reason)
+            if not fail_closed:
+                return
+            result = await loop.run_in_executor(None, lambda: datauri.censor_data_uris(
+                body, self.censor, fail_closed=True, matches=matches, force_reason=reason))
+        finally:
+            self.in_flight -= 1
+
+        if result.changed:
+            _replace_body(flow, result.body)
+        for mime, r in result.results:
+            self.detections.record(r, flow.request.pretty_host, flow.request.pretty_url, mime,
+                                   source="data-uri")
+
+    def _is_data_uri_text(self, flow: http.HTTPFlow) -> bool:
+        return (self.cfg.data_uris.enabled and flow.response is not None
+                and flow.response.status_code == 200
+                and _mime(flow) in self.cfg.data_uris.content_types)
+
+
+def _mime(flow: http.HTTPFlow) -> str:
+    return flow.response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+
+
+def _failure_reason(e: Exception) -> str:
+    return "timeout" if isinstance(e, TimeoutError) else f"error: {type(e).__name__}: {e}"
+
+
+def _replace_body(flow: http.HTTPFlow, data: bytes) -> None:
+    flow.response.content = data
+    # Integrity headers describe the original body. ETag and Last-Modified
+    # stay so the browser can keep caching the result.
+    for header in ("Content-MD5", "Digest", "Repr-Digest", "Content-Digest"):
+        flow.response.headers.pop(header, None)
 
 
 def _is_image(flow: http.HTTPFlow) -> bool:

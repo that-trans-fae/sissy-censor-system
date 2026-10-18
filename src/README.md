@@ -116,4 +116,5 @@ Rebuild the image first if `requirements.txt` changed; the code itself is
 mounted. Unit tests use a fake detector and need no weights.
 `tests/test_samples.py` runs each model against its confirmed fixture and needs
 the sample images in `docs/samples/` (not in git); known failures show as
-xfail.
+xfail. 640m animation cases take ~90 s each and are skipped unless
+`CENSOR_SLOW_TESTS=1` is set (`docker run -e CENSOR_SLOW_TESTS=1 ...`).

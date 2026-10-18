@@ -1,27 +1,786 @@
 [
   {
-    "file": "censor/made-to-be-thrown-around-f-v0-qjqk8ekfn2wh1.webp",
+    "file": "censor/0evmg60pfbvh1.gif",
     "action": "censored",
+    "frame": 5,
+    "frames": 200,
     "detections": [
       {
         "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.788,
+        "score": 0.9,
         "box": [
-          259,
-          448,
-          107,
-          110
+          20,
+          188,
+          245,
+          231
         ],
         "censor": true,
         "why": "female label"
       },
       {
-        "label": "BELLY_EXPOSED",
-        "score": 0.767,
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.34,
         "box": [
-          313,
-          549,
-          103,
+          122,
+          0,
+          241,
+          167
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.304,
+        "box": [
+          166,
+          0,
+          182,
+          151
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/2025-08-12 18.19.55.jpg",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.892,
+        "box": [
+          1321,
+          420,
+          742,
+          1054
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.626,
+        "box": [
+          222,
+          121,
+          1062,
+          928
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.275,
+        "box": [
+          1,
+          640,
+          515,
+          401
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/2025-10-01 22.03.16.jpg",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.848,
+        "box": [
+          1011,
+          30,
+          1052,
+          1433
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.639,
+        "box": [
+          578,
+          811,
+          1216,
+          676
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.364,
+        "box": [
+          1069,
+          325,
+          418,
+          967
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/2025-12-22 17.29.03.jpg",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.691,
+        "box": [
+          576,
+          796,
+          444,
+          613
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.589,
+        "box": [
+          1355,
+          407,
+          1284,
+          961
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.404,
+        "box": [
+          118,
+          102,
+          982,
+          871
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.284,
+        "box": [
+          1284,
+          360,
+          778,
+          1021
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.255,
+        "box": [
+          8,
+          0,
+          533,
+          366
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/2026-02-05 13.50.07.jpg",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.745,
+        "box": [
+          1764,
+          105,
+          951,
+          944
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.711,
+        "box": [
+          1434,
+          120,
+          831,
+          810
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.7,
+        "box": [
+          1407,
+          1291,
+          569,
+          973
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.445,
+        "box": [
+          1780,
+          1288,
+          532,
+          971
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.391,
+        "box": [
+          1835,
+          528,
+          270,
+          435
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "ANUS_EXPOSED",
+        "score": 0.348,
+        "box": [
+          1991,
+          260,
+          158,
+          200
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/2026-09-15 12.51.49.jpg",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.803,
+        "box": [
+          680,
+          634,
+          694,
+          724
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.772,
+        "box": [
+          4,
+          706,
+          634,
+          617
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.41,
+        "box": [
+          540,
+          0,
+          788,
+          299
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.315,
+        "box": [
+          112,
+          526,
+          179,
+          265
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.282,
+        "box": [
+          248,
+          1517,
+          831,
+          418
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/3.jpg",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.703,
+        "box": [
+          1,
+          1732,
+          1017,
+          927
+        ],
+        "censor": true,
+        "why": "female label"
+      }
+    ]
+  },
+  {
+    "file": "censor/7cx7wkuqfbvh1.gif",
+    "action": "censored",
+    "frame": 45,
+    "frames": 200,
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.717,
+        "box": [
+          383,
+          8,
+          350,
+          331
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.694,
+        "box": [
+          173,
+          8,
+          205,
+          176
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.619,
+        "box": [
+          145,
+          167,
+          218,
+          234
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.329,
+        "box": [
+          75,
+          172,
+          284,
+          247
+        ],
+        "censor": true,
+        "why": "near FEMALE_BREAST_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/8d6e5vl0unvh1.gif",
+    "action": "censored",
+    "frame": 16,
+    "frames": 37,
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.495,
+        "box": [
+          231,
+          2,
+          618,
+          319
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.466,
+        "box": [
+          0,
+          3,
+          198,
+          473
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.451,
+        "box": [
+          710,
+          0,
+          141,
+          135
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.352,
+        "box": [
+          598,
+          0,
+          224,
+          57
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_GENITALIA_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/alone-in-my-hotel-room-you-know-whats-gonna-happen-f-v0-ayje0ahlk3vh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.763,
+        "box": [
+          252,
+          432,
+          568,
+          474
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.494,
+        "box": [
+          453,
+          13,
+          450,
+          433
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.271,
+        "box": [
+          134,
+          1096,
+          266,
+          352
+        ],
+        "censor": false,
+        "why": "below threshold 0.3"
+      }
+    ]
+  },
+  {
+    "file": "censor/be-f-ore-after-v0-k1qubhm67awh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.518,
+        "box": [
+          36,
+          0,
+          730,
+          773
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.342,
+        "box": [
+          227,
+          731,
+          801,
+          561
+        ],
+        "censor": false,
+        "why": "near MALE_GENITALIA_EXPOSED only"
+      }
+    ],
+    "xfail": "missed: MALE_GENITALIA_EXPOSED 0.518 (label not censored); BUTTOCKS_EXPOSED 0.342 (near MALE_GENITALIA_EXPOSED only)"
+  },
+  {
+    "file": "censor/f-morning-or-maybe-afternoon-check-in-v0-xvsy9hukn9wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.691,
+        "box": [
+          277,
+          360,
+          290,
+          164
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.614,
+        "box": [
+          182,
+          180,
+          417,
+          353
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.358,
+        "box": [
+          504,
+          728,
+          223,
+          260
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/happy-friday-f-v0-xqohqd07ovvh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.63,
+        "box": [
+          368,
+          366,
+          486,
+          510
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.359,
+        "box": [
+          548,
+          815,
+          530,
+          444
+        ],
+        "censor": false,
+        "why": "below threshold 0.4"
+      }
+    ],
+    "xfail": "missed: FEMALE_BREAST_EXPOSED 0.359 (below threshold 0.4)"
+  },
+  {
+    "file": "censor/hey-wanna-see-a-magic-trick-im-gonna-make-this-cock-v0-aat0mk9c3psh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.577,
+        "box": [
+          776,
+          1181,
+          237,
+          137
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.419,
+        "box": [
+          1,
+          676,
+          350,
+          545
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.397,
+        "box": [
+          680,
+          1080,
+          185,
+          156
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/is-it-spooky-season-yet-f-v0-3ms95iqgt8wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.343,
+        "box": [
+          463,
+          360,
+          294,
+          67
+        ],
+        "censor": false,
+        "why": "below threshold 0.4"
+      }
+    ],
+    "xfail": "missed: FEMALE_BREAST_EXPOSED 0.343 (below threshold 0.4)"
+  },
+  {
+    "file": "censor/just-missing-a-mouth-nb-v0-vd20alaci9wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.4,
+        "box": [
+          340,
+          137,
+          436,
+          248
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.377,
+        "box": [
+          15,
+          2,
+          564,
+          577
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/keep-swiping-for-a-soaking-wet-pussy-f-v0-gw5h0wl0unvh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.64,
+        "box": [
+          416,
+          1161,
+          663,
+          726
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.358,
+        "box": [
+          429,
+          404,
+          649,
+          269
+        ],
+        "censor": true,
+        "why": "unattributed"
+      }
+    ]
+  },
+  {
+    "file": "censor/keep-swiping-for-a-soaking-wet-pussy-f-v0-oasv0vl0unvh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.558,
+        "box": [
+          312,
+          908,
+          766,
+          823
+        ],
+        "censor": true,
+        "why": "female label"
+      }
+    ]
+  },
+  {
+    "file": "censor/keep-swiping-for-a-soaking-wet-pussy-f-v0-qpushvl0unvh1.webp",
+    "action": "censored",
+    "detections": [],
+    "xfail": "missed: no detections"
+  },
+  {
+    "file": "censor/made-to-be-thrown-around-f-v0-qjqk8ekfn2wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.824,
+        "box": [
+          257,
+          449,
+          109,
+          109
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.812,
+        "box": [
+          314,
+          552,
+          107,
           92
         ],
         "censor": false,
@@ -29,24 +788,24 @@
       },
       {
         "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.396,
+        "score": 0.461,
         "box": [
-          366,
-          444,
-          77,
-          99
+          363,
+          439,
+          78,
+          104
         ],
         "censor": true,
         "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
       },
       {
         "label": "FACE_FEMALE",
-        "score": 0.283,
+        "score": 0.342,
         "box": [
-          323,
-          243,
-          86,
-          95
+          321,
+          251,
+          91,
+          96
         ],
         "censor": false,
         "why": "label not censored"
@@ -71,12 +830,12 @@
       },
       {
         "label": "FEMALE_GENITALIA_EXPOSED",
-        "score": 0.697,
+        "score": 0.765,
         "box": [
-          225,
-          359,
-          57,
-          46
+          227,
+          356,
+          56,
+          49
         ],
         "censor": true,
         "why": "female label"
@@ -96,17 +855,159 @@
     ]
   },
   {
+    "file": "censor/more-and-more-tits-i-hope-you-dont-mind-f-v0-skmcvep30awh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.834,
+        "box": [
+          362,
+          0,
+          441,
+          203
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.689,
+        "box": [
+          238,
+          445,
+          197,
+          301
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.663,
+        "box": [
+          419,
+          498,
+          326,
+          321
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.504,
+        "box": [
+          134,
+          449,
+          296,
+          279
+        ],
+        "censor": true,
+        "why": "female label"
+      }
+    ]
+  },
+  {
+    "file": "censor/rk087o9c3psh1.gif",
+    "action": "censored",
+    "frame": 30,
+    "frames": 200,
+    "detections": [
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.567,
+        "box": [
+          517,
+          787,
+          156,
+          91
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.422,
+        "box": [
+          0,
+          420,
+          265,
+          399
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.419,
+        "box": [
+          0,
+          336,
+          179,
+          307
+        ],
+        "censor": true,
+        "why": "near FEMALE_BREAST_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/s5omzyypfbvh1.gif",
+    "action": "censored",
+    "frame": 0,
+    "frames": 200,
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.869,
+        "box": [
+          0,
+          173,
+          228,
+          246
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.806,
+        "box": [
+          144,
+          0,
+          220,
+          151
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.801,
+        "box": [
+          289,
+          124,
+          352,
+          277
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
     "file": "censor/so-needy-for-you-f-v0-7wq6k0ov05wh1.webp",
     "action": "censored",
     "detections": [
       {
         "label": "FEMALE_GENITALIA_EXPOSED",
-        "score": 0.639,
+        "score": 0.685,
         "box": [
-          86,
-          138,
-          355,
-          533
+          58,
+          214,
+          426,
+          445
         ],
         "censor": true,
         "why": "female label"
@@ -118,61 +1019,73 @@
     "action": "censored",
     "detections": [
       {
-        "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.816,
+        "label": "BELLY_EXPOSED",
+        "score": 0.849,
         "box": [
-          216,
-          263,
-          208,
-          210
+          146,
+          524,
+          311,
+          306
         ],
-        "censor": true,
-        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+        "censor": false,
+        "why": "label not censored"
       },
       {
         "label": "FACE_FEMALE",
-        "score": 0.798,
+        "score": 0.84,
         "box": [
-          231,
+          224,
           0,
-          191,
-          116
-        ],
-        "censor": false,
-        "why": "label not censored"
-      },
-      {
-        "label": "BELLY_EXPOSED",
-        "score": 0.789,
-        "box": [
-          172,
-          493,
-          251,
-          341
+          212,
+          132
         ],
         "censor": false,
         "why": "label not censored"
       },
       {
         "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.76,
+        "score": 0.829,
         "box": [
-          57,
-          268,
-          150,
-          182
+          209,
+          262,
+          224,
+          209
         ],
         "censor": true,
         "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
       },
       {
-        "label": "FEMALE_GENITALIA_COVERED",
-        "score": 0.646,
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.811,
         "box": [
-          304,
-          830,
-          122,
-          145
+          55,
+          284,
+          149,
+          165
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.715,
+        "box": [
+          163,
+          463,
+          265,
+          176
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_GENITALIA_COVERED",
+        "score": 0.707,
+        "box": [
+          293,
+          818,
+          157,
+          154
         ],
         "censor": false,
         "why": "label not censored"
@@ -188,6 +1101,230 @@
         ],
         "censor": false,
         "why": "label not censored"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.382,
+        "box": [
+          73,
+          221,
+          59,
+          87
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.366,
+        "box": [
+          194,
+          497,
+          289,
+          92
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_GENITALIA_COVERED",
+        "score": 0.284,
+        "box": [
+          152,
+          735,
+          90,
+          99
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_GENITALIA_COVERED",
+        "score": 0.267,
+        "box": [
+          301,
+          829,
+          138,
+          58
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/svdz37wrfbvh1.gif",
+    "action": "censored",
+    "frame": 90,
+    "frames": 200,
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.749,
+        "box": [
+          180,
+          396,
+          66,
+          135
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.66,
+        "box": [
+          57,
+          320,
+          300,
+          173
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.562,
+        "box": [
+          99,
+          334,
+          236,
+          85
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "ANUS_EXPOSED",
+        "score": 0.469,
+        "box": [
+          189,
+          360,
+          48,
+          49
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "ANUS_EXPOSED",
+        "score": 0.364,
+        "box": [
+          194,
+          395,
+          37,
+          23
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/type-of-pics-i-send-when-its-late-and-im-needy-f-or-your-v0-73qom3ke9ruh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.492,
+        "box": [
+          545,
+          426,
+          299,
+          370
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.338,
+        "box": [
+          228,
+          131,
+          410,
+          341
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/type-of-pics-i-send-when-its-late-and-im-needy-f-or-your-v0-zj013kje9ruh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.694,
+        "box": [
+          362,
+          0,
+          378,
+          224
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.594,
+        "box": [
+          676,
+          0,
+          309,
+          272
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BELLY_COVERED",
+        "score": 0.529,
+        "box": [
+          407,
+          283,
+          488,
+          429
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.506,
+        "box": [
+          151,
+          789,
+          906,
+          290
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_COVERED"
+      },
+      {
+        "label": "FEMALE_GENITALIA_COVERED",
+        "score": 0.475,
+        "box": [
+          551,
+          773,
+          225,
+          239
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.423,
+        "box": [
+          558,
+          780,
+          239,
+          210
+        ],
+        "censor": true,
+        "why": "female label"
       }
     ]
   },
@@ -197,39 +1334,39 @@
     "detections": [
       {
         "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.853,
+        "score": 0.856,
         "box": [
-          6,
-          258,
-          228,
-          211
+          80,
+          254,
+          152,
+          216
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.817,
+        "box": [
+          80,
+          93,
+          138,
+          166
         ],
         "censor": true,
         "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
       },
       {
         "label": "BELLY_EXPOSED",
-        "score": 0.788,
+        "score": 0.795,
         "box": [
-          229,
-          139,
-          231,
-          232
+          223,
+          141,
+          242,
+          245
         ],
         "censor": false,
         "why": "label not censored"
-      },
-      {
-        "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.782,
-        "box": [
-          37,
-          101,
-          180,
-          147
-        ],
-        "censor": true,
-        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
       },
       {
         "label": "FEMALE_GENITALIA_COVERED",
@@ -242,6 +1379,74 @@
         ],
         "censor": false,
         "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.528,
+        "box": [
+          160,
+          89,
+          63,
+          172
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      }
+    ]
+  },
+  {
+    "file": "censor/zcwb7poow8wh1.gif",
+    "action": "censored",
+    "frame": 112,
+    "frames": 179,
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.941,
+        "box": [
+          0,
+          223,
+          195,
+          227
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.94,
+        "box": [
+          143,
+          230,
+          183,
+          233
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.593,
+        "box": [
+          151,
+          223,
+          176,
+          104
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.568,
+        "box": [
+          0,
+          191,
+          190,
+          136
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
       }
     ]
   },
@@ -258,8 +1463,20 @@
           974,
           674
         ],
-        "censor": true,
-        "why": "unattributed"
+        "censor": false,
+        "why": "near MALE_GENITALIA_EXPOSED only"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.558,
+        "box": [
+          370,
+          1991,
+          323,
+          405
+        ],
+        "censor": false,
+        "why": "label not censored"
       },
       {
         "label": "FEET_EXPOSED",
@@ -285,7 +1502,8 @@
         "censor": false,
         "why": "label not censored"
       }
-    ]
+    ],
+    "xfail": "missed: BUTTOCKS_EXPOSED 0.827 (near MALE_GENITALIA_EXPOSED only); MALE_GENITALIA_EXPOSED 0.558 (label not censored)"
   },
   {
     "file": "mixed/daddy-said-i-look-better-as-a-doll-v0-go3cqahf2awh1.webp",
@@ -293,15 +1511,27 @@
     "detections": [
       {
         "label": "FACE_FEMALE",
-        "score": 0.845,
+        "score": 0.871,
         "box": [
-          355,
-          186,
-          207,
-          236
+          352,
+          188,
+          211,
+          239
         ],
         "censor": false,
         "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.56,
+        "box": [
+          166,
+          630,
+          226,
+          269
+        ],
+        "censor": true,
+        "why": "female label"
       },
       {
         "label": "FEMALE_BREAST_COVERED",
@@ -327,13 +1557,97 @@
         "censor": false,
         "why": "label not censored"
       }
+    ]
+  },
+  {
+    "file": "mixed/i-get-sluttier-every-time-i-get-a-new-tattoo-v0-0shta7tlbawh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.698,
+        "box": [
+          277,
+          471,
+          251,
+          254
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.422,
+        "box": [
+          99,
+          405,
+          183,
+          181
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "mixed/i-get-sluttier-every-time-i-get-a-new-tattoo-v0-b9bgcqvlbawh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.613,
+        "box": [
+          432,
+          288,
+          192,
+          277
+        ],
+        "censor": false,
+        "why": "below threshold 0.625, male context only"
+      },
+      {
+        "label": "MALE_BREAST_EXPOSED",
+        "score": 0.555,
+        "box": [
+          214,
+          489,
+          268,
+          270
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.401,
+        "box": [
+          41,
+          432,
+          185,
+          176
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
     ],
-    "xfail": "320n scores both exposed breasts as FEMALE_BREAST_COVERED"
+    "xfail": "missed: FEMALE_BREAST_EXPOSED 0.613 (below threshold 0.625, male context only); MALE_BREAST_EXPOSED 0.555 (label not censored)"
   },
   {
     "file": "mixed/what-kinda-cage-should-i-get-v0-nvv7ulwwg5wh1.webp",
     "action": "censored",
     "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.828,
+        "box": [
+          768,
+          51,
+          311,
+          332
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
       {
         "label": "BELLY_EXPOSED",
         "score": 0.823,
@@ -360,18 +1674,17 @@
       },
       {
         "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.624,
+        "score": 0.64,
         "box": [
-          760,
-          36,
-          319,
-          410
+          441,
+          94,
+          331,
+          270
         ],
-        "censor": false,
-        "why": "below threshold 0.65, male context only"
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
       }
-    ],
-    "xfail": "320n finds one breast at 0.62, inside the score range of the uncensor/rub-an-irish false positive"
+    ]
   },
   {
     "file": "uncensor/48-straight-pick-your-favorite-v0-ond5zf7vyyvh1.webp",
@@ -379,24 +1692,24 @@
     "detections": [
       {
         "label": "MALE_GENITALIA_EXPOSED",
-        "score": 0.423,
+        "score": 0.634,
         "box": [
-          329,
-          633,
-          185,
-          186
+          327,
+          632,
+          190,
+          187
         ],
         "censor": false,
         "why": "label not censored"
       },
       {
         "label": "FACE_MALE",
-        "score": 0.318,
+        "score": 0.366,
         "box": [
-          274,
+          267,
           0,
-          174,
-          50
+          190,
+          64
         ],
         "censor": false,
         "why": "label not censored"
@@ -409,24 +1722,24 @@
     "detections": [
       {
         "label": "BELLY_EXPOSED",
-        "score": 0.655,
+        "score": 0.768,
         "box": [
-          20,
-          933,
-          636,
-          717
+          60,
+          895,
+          654,
+          492
         ],
         "censor": false,
         "why": "label not censored"
       },
       {
         "label": "FEET_COVERED",
-        "score": 0.39,
+        "score": 0.587,
         "box": [
-          840,
-          29,
-          221,
-          326
+          849,
+          35,
+          220,
+          310
         ],
         "censor": false,
         "why": "label not censored"
@@ -439,12 +1752,12 @@
     "detections": [
       {
         "label": "FACE_FEMALE",
-        "score": 0.821,
+        "score": 0.884,
         "box": [
-          148,
-          277,
-          174,
-          184
+          131,
+          275,
+          202,
+          189
         ],
         "censor": false,
         "why": "label not censored"
@@ -463,29 +1776,30 @@
       },
       {
         "label": "MALE_GENITALIA_EXPOSED",
-        "score": 0.374,
+        "score": 0.585,
         "box": [
-          475,
-          726,
-          202,
-          119
+          476,
+          733,
+          200,
+          105
         ],
         "censor": false,
         "why": "label not censored"
       },
       {
         "label": "ANUS_EXPOSED",
-        "score": 0.372,
+        "score": 0.452,
         "box": [
-          709,
-          711,
-          69,
-          68
+          715,
+          715,
+          68,
+          65
         ],
-        "censor": false,
-        "why": "below threshold"
+        "censor": true,
+        "why": "unattributed"
       }
-    ]
+    ],
+    "xfail": "false positive: ANUS_EXPOSED 0.452 (unattributed)"
   },
   {
     "file": "uncensor/covered-or-exposed-v0-okpp95b7m5wh1.webp",
@@ -493,12 +1807,42 @@
     "detections": [
       {
         "label": "MALE_GENITALIA_EXPOSED",
-        "score": 0.761,
+        "score": 0.811,
         "box": [
-          24,
-          402,
-          445,
-          220
+          11,
+          391,
+          479,
+          264
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.386,
+        "box": [
+          236,
+          0,
+          403,
+          512
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/doesnt-a-ride-sound-nice-about-now-m-v0-bkryrgzspawh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.725,
+        "box": [
+          178,
+          12,
+          715,
+          724
         ],
         "censor": false,
         "why": "label not censored"
@@ -511,12 +1855,36 @@
     "detections": [
       {
         "label": "BELLY_EXPOSED",
-        "score": 0.732,
+        "score": 0.781,
         "box": [
-          242,
-          837,
-          385,
-          437
+          227,
+          892,
+          408,
+          379
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.57,
+        "box": [
+          233,
+          813,
+          354,
+          266
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.413,
+        "box": [
+          235,
+          1353,
+          259,
+          405
         ],
         "censor": false,
         "why": "label not censored"
@@ -582,28 +1950,28 @@
     "action": "clean",
     "detections": [
       {
-        "label": "FEMALE_BREAST_EXPOSED",
-        "score": 0.63,
-        "box": [
-          0,
-          142,
-          251,
-          371
-        ],
-        "censor": false,
-        "why": "below threshold 0.65, male context only"
-      },
-      {
         "label": "MALE_GENITALIA_EXPOSED",
-        "score": 0.602,
+        "score": 0.767,
         "box": [
-          454,
-          209,
-          483,
-          333
+          429,
+          151,
+          380,
+          444
         ],
         "censor": false,
         "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.708,
+        "box": [
+          0,
+          121,
+          266,
+          423
+        ],
+        "censor": true,
+        "why": "female label, male context only"
       },
       {
         "label": "BELLY_EXPOSED",
@@ -617,6 +1985,7 @@
         "censor": false,
         "why": "label not censored"
       }
-    ]
+    ],
+    "xfail": "false positive: FEMALE_BREAST_EXPOSED 0.708 (female label, male context only)"
   }
 ]

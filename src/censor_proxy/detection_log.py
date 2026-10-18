@@ -39,7 +39,8 @@ class DetectionLog:
             _logger.addHandler(handler)
             _logger.setLevel(logging.INFO)
 
-    def record(self, result: ScanResult, host: str, url: str, mime: str) -> None:
+    def record(self, result: ScanResult, host: str, url: str, mime: str,
+               source: str = "response") -> None:
         if self.level == "off" or not _logger.handlers:
             return
         notable = result.action in ("censored", "fail_closed", "error") or any(
@@ -51,6 +52,7 @@ class DetectionLog:
             "host": host,
             **({"url": url} if self.level == "debug" else {}),
             "mime": mime,
+            **({"source": source} if source != "response" else {}),
             "format": result.format,
             "action": result.action,
             **({"reason": result.reason} if result.reason else {}),

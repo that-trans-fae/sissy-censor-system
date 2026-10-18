@@ -19,7 +19,8 @@ replaced. Everything runs locally: no external API calls, no telemetry.
 ```
 src/censor.py                  mitmproxy addon (entry point, mitmdump -s)
 src/censor_proxy/imaging.py    Censor.censor_bytes(): decode, detect, blur, re-encode
-src/censor_proxy/detection.py  NudeNet wrapper and decide(), the selection rule
+src/censor_proxy/detection.py  NudeNet wrapper (with tiling) and decide(), the selection rule
+src/censor_proxy/datauri.py    base64 data-URI images in HTML/CSS/JSON bodies
 src/censor_proxy/config.py     dataclasses + loader (defaults.yaml merged with user file)
 src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
@@ -45,6 +46,12 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/..:/w" -w /w/src ce
 ```bash
 docker compose up -d --build
 ```
+
+The sample tests run both models over every sample (~2 minutes). 640m on
+animations takes ~90 s each, so those cases are skipped unless
+`-e CENSOR_SLOW_TESTS=1` is passed to `docker run`; run them before freezing
+a 640m fixture. Add `--deselect tests/test_samples.py` for a quick unit-test
+run.
 
 The test command mounts the working tree, so code edits don't need a rebuild;
 dependency or Dockerfile changes do. Restart the compose container after
@@ -78,8 +85,9 @@ stdin, or put them under `src/` and delete them afterwards.
   640m; it uses the default model otherwise), check every sample against its
   folder (`censor/` and `mixed/` censored, `uncensor/` clean) for both
   models, and ask the user to confirm new or changed boxes by eye before
-  rewriting a fixture. Never freeze unconfirmed boxes. Known model failures
-  stay in the fixture as strict xfails.
+  rewriting a fixture. Never freeze unconfirmed boxes. Samples a model gets
+  wrong stay in its fixture as strict xfails, with the correct result and
+  the reason (the detections that fell short).
 - **Sample images are explicit.** Don't view them, don't commit them, and
   never publish review output as an artifact or share it anywhere. Work
   from detection scores and let the user do the visual review.
@@ -101,3 +109,6 @@ stdin, or put them under `src/` and delete them afterwards.
   policy; the NSS database route registers it as an intermediate. Its
   updater hosts are in the passthrough list because they ignore the policy.
 - `src/mitmproxy/` holds the CA private key: never commit or share it.
+- `docker ps` truncates commands, so grepping its output for a script name
+  silently matches nothing; use `--no-trunc` (or `--filter`) before killing
+  a background container.

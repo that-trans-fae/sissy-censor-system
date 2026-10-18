@@ -18,11 +18,15 @@ Last updated Oct 18, 2026.
 - Box-draw review tool, unit tests, per-model sample fixtures
 - Chromium (snap): CA trusted via policy, verified on live HTTPS in a test
   profile
+- Data URIs: base64 images in HTML, CSS and JSON (including JSON-escaped
+  slashes) are censored in place through the same `censor_bytes()`
+- Recall tuning: tiling of tall/wide images and lower thresholds (false
+  positives preferred to misses)
 
 ## Not done yet
 
-- **Data URIs**: base64 images inlined in HTML, CSS and JSON (in scope for
-  v1, handoff pipeline "Text bodies")
+- **Video**: plain files and HLS/DASH, paused and covered until "play
+  censored"; design approved in `video-design.md`, being built
 - **System-wide proxy**: GNOME proxy setting with `src/proxy.pac`, and a check
   that browsing falls back to direct when the container is down. Chromium may
   not accept a `file://` PAC URL from system settings; if not, serve it over

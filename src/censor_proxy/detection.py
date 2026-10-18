@@ -29,6 +29,13 @@ class Box:
         dy = max(0, other.y - (self.y + self.h), self.y - (other.y + other.h))
         return math.hypot(dx, dy)
 
+    def iou(self, other: Box) -> float:
+        ix = max(0, min(self.x + self.w, other.x + other.w) - max(self.x, other.x))
+        iy = max(0, min(self.y + self.h, other.y + other.h) - max(self.y, other.y))
+        inter = ix * iy
+        union = self.w * self.h + other.w * other.h - inter
+        return inter / union if union else 0.0
+
     def padded(self, fraction: float, width: int, height: int) -> Box:
         px, py = int(self.w * fraction), int(self.h * fraction)
         x0, y0 = max(0, self.x - px), max(0, self.y - py)
@@ -59,6 +66,7 @@ class Detector:
     """Thread-safe: onnxruntime sessions may be run concurrently."""
 
     def __init__(self, cfg: ModelConfig):
+        self.tiling = cfg.tiling
         path = cfg.path or BUNDLED_320N
         resolution = cfg.resolution if cfg.path else 320
         if not os.path.isfile(path):
@@ -76,11 +84,49 @@ class Detector:
         )
 
     def detect(self, bgr: np.ndarray) -> list[Detection]:
-        """`bgr` is an HxWx3 uint8 array in OpenCV channel order."""
+        """`bgr` is an HxWx3 uint8 array in OpenCV channel order.
+
+        With tiling on, tall or wide images are also scanned as overlapping
+        square tiles, so small regions aren't lost when the whole frame is
+        shrunk to the model's input size. Duplicates across tiles are merged.
+        """
+        found = self._detect_one(bgr)
+        if not self.tiling:
+            return found
+        for x, y, size in tiles(*bgr.shape[:2]):
+            crop = np.ascontiguousarray(bgr[y:y + size, x:x + size])
+            found += [Detection(d.label, d.score, Box(d.box.x + x, d.box.y + y, d.box.w, d.box.h))
+                      for d in self._detect_one(crop)]
+        return merge(found)
+
+    def _detect_one(self, bgr: np.ndarray) -> list[Detection]:
         return [
             Detection(r["class"], float(r["score"]), Box(*r["box"]))
             for r in self._nd.detect(bgr)
         ]
+
+
+def tiles(height: int, width: int) -> list[tuple[int, int, int]]:
+    """Overlapping square tiles (x, y, size) along the long side of an image
+    more than 1.2x longer than it is wide (or vice versa); none otherwise."""
+    short, long_ = min(height, width), max(height, width)
+    if long_ <= short * 1.2:
+        return []
+    n = math.ceil(long_ / short) + 1
+    step = (long_ - short) / (n - 1)
+    offsets = [round(i * step) for i in range(n)]
+    if height > width:
+        return [(0, o, short) for o in offsets]
+    return [(o, 0, short) for o in offsets]
+
+
+def merge(detections: list[Detection], iou: float = 0.4) -> list[Detection]:
+    """Drop lower-scoring duplicates: same label, overlapping by more than `iou`."""
+    kept: list[Detection] = []
+    for d in sorted(detections, key=lambda d: -d.score):
+        if not any(k.label == d.label and k.box.iou(d.box) > iou for k in kept):
+            kept.append(d)
+    return kept
 
 
 def decide(detections: list[Detection], cfg: DetectionConfig) -> list[Decision]:

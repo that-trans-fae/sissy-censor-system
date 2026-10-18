@@ -36,4 +36,9 @@ def test_bad_config_rejected(make_config, text):
 def test_label_threshold_override(make_config):
     cfg = make_config("detection: {label_thresholds: {FEMALE_BREAST_EXPOSED: 0.7}}\n")
     assert cfg.detection.threshold_for("FEMALE_BREAST_EXPOSED") == 0.7
-    assert cfg.detection.threshold_for("FEMALE_GENITALIA_EXPOSED") == 0.5
+    assert cfg.detection.threshold_for("FEMALE_GENITALIA_EXPOSED") == cfg.detection.threshold
+
+
+def test_data_uri_content_types_normalised(make_config):
+    cfg = make_config("data_uris: {content_types: [Text/HTML]}\n")
+    assert cfg.data_uris.content_types == {"text/html"}

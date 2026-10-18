@@ -8,6 +8,7 @@ images, which are not in git.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -27,8 +28,18 @@ MODELS = {
 if not SAMPLES.is_dir():
     pytest.skip(f"sample images not present ({SAMPLES}); they are not in git", allow_module_level=True)
 
+# 640m with tiling takes ~90 s per animation; opt in with CENSOR_SLOW_TESTS=1.
+SLOW = os.environ.get("CENSOR_SLOW_TESTS") == "1"
+
+
+def _marks(model, case):
+    if model == "640m" and "frames" in case and not SLOW:
+        return [pytest.mark.skip(reason="slow: 640m animation; set CENSOR_SLOW_TESTS=1")]
+    return []
+
+
 CASES = [
-    pytest.param(model, case, id=f"{model}:{case['file']}")
+    pytest.param(model, case, id=f"{model}:{case['file']}", marks=_marks(model, case))
     for model in MODELS
     if (FIXTURES / f"expected-{model}.json").exists()
     for case in json.loads((FIXTURES / f"expected-{model}.json").read_text())
@@ -71,8 +82,10 @@ def test_sample(censors, model, case, request):
         request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
     result = censors(model).censor_bytes((SAMPLES / case["file"]).read_bytes())
     assert result.action == case["action"]
+    # Animations record one sampled frame's boxes; compare against that frame.
+    decisions = dict(result.frame_decisions).get(case.get("frame", 0), [])
     got = [[d.detection.box.x, d.detection.box.y, d.detection.box.w, d.detection.box.h]
-           for d in result.censored_decisions]
+           for d in decisions if d.censor]
     want = [d["box"] for d in case["detections"] if d["censor"]]
     assert len(got) == len(want), f"censored {len(got)} boxes, expected {len(want)}"
     for box in want:

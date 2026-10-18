@@ -12,12 +12,19 @@ model:
   # Concurrent inference workers, and onnxruntime threads per worker.
   workers: 2
   threads_per_worker: 4
+  # Also scan tall or wide images as overlapping square tiles. Catches small
+  # regions lost when the whole frame is shrunk to the model's input, at
+  # roughly 2-4x the inference time on those images.
+  tiling: true
 
 detection:
-  # Minimum score for a box to be censored.
-  threshold: 0.5
-  # Per-label overrides of `threshold`, e.g. {FEMALE_BREAST_EXPOSED: 0.6}.
-  label_thresholds: {}
+  # Minimum score for a box to be censored. Set low on purpose: false
+  # positives are preferred to misses.
+  threshold: 0.3
+  # Per-label overrides of `threshold`. Breasts sit higher: at 0.3 they
+  # over-triggered.
+  label_thresholds:
+    FEMALE_BREAST_EXPOSED: 0.4
   # Context adjusts the threshold for female labels:
   # - a box near (see `proximity`) another female-label box that is above its
   #   own threshold needs only corroborated_threshold, e.g. the second breast
@@ -25,8 +32,8 @@ detection:
   # - a box with no other female context anywhere in the image, while male
   #   context is present, needs male_context_threshold, e.g. a male chest
   #   misread as female. Set it equal to `threshold` to disable.
-  corroborated_threshold: 0.35
-  male_context_threshold: 0.65
+  corroborated_threshold: 0.3
+  male_context_threshold: 0.625
   # Always censored when above threshold.
   female_labels:
     - FEMALE_BREAST_EXPOSED
@@ -84,12 +91,26 @@ images:
   size_floor_bytes: 4096
   min_side_px: 64
   # Image responses larger than this are streamed through unscanned.
-  max_bytes: 26214400
+  max_bytes: 67108864
   # Animated images: run detection on every Nth frame; skipped frames get the
-  # union of the boxes from the sampled frames either side.
+  # union of the boxes from the sampled frames either side. Long animations
+  # use a larger step so no more than max_detect_frames are scanned.
   frame_step: 2
+  max_detect_frames: 48
   # Animations with more frames than this are fail-closed rather than scanned.
   max_frames: 600
+
+data_uris:
+  # Scan text bodies for base64 data-URI images (data:image/...;base64,...)
+  # and censor them in place, with the same rules as image responses.
+  enabled: true
+  # Matched against the response Content-Type, ignoring parameters.
+  content_types:
+    - text/html
+    - text/css
+    - application/json
+  # Larger text bodies are streamed through unscanned.
+  max_body_bytes: 10485760
 
 proxy:
   # Regexes matched against host:port. Matching hosts bypass TLS
