@@ -11,6 +11,7 @@ Answers to the open questions in the project handoff, settled Oct 18, 2026.
 | Scope of "explicit" | Exposed anatomy only (`*_EXPOSED` labels). No InsightFace fallback in v1. |
 | Female-only selection | Censor an explicit allowlist of labels rather than matching a `FEMALE_` prefix. Unsexed labels (`BUTTOCKS_EXPOSED`, `ANUS_EXPOSED`) count as female when they overlap or sit near a female detection (`FEMALE_*` or `FACE_FEMALE`). If an image has no female detections, those unsexed boxes are still censored, but nothing else is (never the whole image). |
 | Context thresholds | Female labels use 0.5 by default; 0.35 when the box touches another confident female box (the missed second breast in `made-to-be-thrown-around`); 0.65 when nothing else in the image is female but male context is present (the male chest misread as female in `rub-an-irish…`). Both configurable. Tuned on 11 samples, so expect to revisit. |
+| Model | 320n for now, for speed (~0.1 s vs ~0.6 s per image). 640m stays baked into the image as a config switch. On the samples 320n misses `mixed/what-kinda-cage` and over-censors `uncensor/completely-helpless`; the confirmed fixture is for 640m. |
 | Pre-filter | OpenNSFW2 dropped (it pulls in TensorFlow). NudeNet runs on every image above the size floor; repeat images are served from a content-hash cache. |
 | Log contents | Hostnames by default. Full URLs are logged only at the more verbose level. Configurable. |
 | Browsers | Firefox and Chromium (probably both snaps). CA trust for each to be worked through together. |

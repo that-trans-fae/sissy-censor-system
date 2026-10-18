@@ -4,10 +4,11 @@
 
 model:
   # ONNX weights. null uses the 320n model bundled with the nudenet package
-  # (~10x faster, noticeably less accurate). The Docker image bakes in 640m.
-  path: /app/models/640m.onnx
+  # (~0.1 s/image on CPU). The Docker image also bakes in the more accurate
+  # 640m (~0.6 s/image): set path /app/models/640m.onnx and resolution 640.
+  path: null
   # Must match the model: 640 for 640m, 320 for 320n.
-  resolution: 640
+  resolution: 320
   # Concurrent inference workers, and onnxruntime threads per worker.
   workers: 2
   threads_per_worker: 4

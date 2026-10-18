@@ -11,7 +11,7 @@ mitmproxy/
 logs/
 
 # Box-draw review output
-review/
+review*/
 
 # Sample images stay local; tests/test_samples.py skips without them
 docs/samples/

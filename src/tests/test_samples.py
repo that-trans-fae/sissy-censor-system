@@ -1,8 +1,9 @@
-"""Real-model regression test against the hand-confirmed sample boxes.
+"""Real-model regression test against hand-confirmed sample boxes.
 
-Needs the model weights (run inside the Docker image) and
-tests/fixtures/expected.json, produced by tools/draw_boxes.py and confirmed
-by eye before being copied there.
+Each tests/fixtures/expected-<model>.json is a tools/draw_boxes.py run that
+was confirmed by eye, and is checked with that model regardless of the
+configured default. Needs the model weights (run inside the Docker image)
+and the sample images, which are not in git.
 """
 
 import json
@@ -14,13 +15,25 @@ from censor_proxy.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "docs" / "samples"
-EXPECTED = Path(__file__).with_name("fixtures") / "expected.json"
+FIXTURES = Path(__file__).with_name("fixtures")
 IOU_MIN = 0.7
 
-if not EXPECTED.exists():
-    pytest.skip("no confirmed fixture yet (tests/fixtures/expected.json)", allow_module_level=True)
+MODELS = {
+    "640m": "model: {path: /app/models/640m.onnx, resolution: 640}\n",
+    "320n": "model: {path: null, resolution: 320}\n",
+}
+
 if not SAMPLES.is_dir():
     pytest.skip(f"sample images not present ({SAMPLES}); they are not in git", allow_module_level=True)
+
+CASES = [
+    pytest.param(model, case, id=f"{model}:{case['file']}")
+    for model in MODELS
+    if (FIXTURES / f"expected-{model}.json").exists()
+    for case in json.loads((FIXTURES / f"expected-{model}.json").read_text())
+]
+if not CASES:
+    pytest.skip("no confirmed fixtures yet (tests/fixtures/expected-<model>.json)", allow_module_level=True)
 
 
 def iou(a, b):
@@ -33,20 +46,28 @@ def iou(a, b):
 
 
 @pytest.fixture(scope="module")
-def censor():
+def censors(tmp_path_factory):
     from censor_proxy.imaging import Censor
-    try:
-        return Censor(load_config())
-    except FileNotFoundError as e:
-        pytest.skip(str(e))
+    loaded = {}
+
+    def get(model):
+        if model not in loaded:
+            path = tmp_path_factory.mktemp(model) / "config.yaml"
+            path.write_text(MODELS[model])
+            try:
+                loaded[model] = Censor(load_config(path))
+            except FileNotFoundError as e:
+                pytest.skip(str(e))
+        return loaded[model]
+    return get
 
 
-@pytest.mark.parametrize("case", json.loads(EXPECTED.read_text()), ids=lambda c: c["file"])
-def test_sample(censor, case):
-    result = censor.censor_bytes((SAMPLES / case["file"]).read_bytes())
+@pytest.mark.parametrize("model,case", CASES)
+def test_sample(censors, model, case):
+    result = censors(model).censor_bytes((SAMPLES / case["file"]).read_bytes())
     assert result.action == case["action"]
-    got = [d.detection.box for d in result.censored_decisions]
-    got = [[b.x, b.y, b.w, b.h] for b in got]
+    got = [[d.detection.box.x, d.detection.box.y, d.detection.box.w, d.detection.box.h]
+           for d in result.censored_decisions]
     want = [d["box"] for d in case["detections"] if d["censor"]]
     assert len(got) == len(want), f"censored {len(got)} boxes, expected {len(want)}"
     for box in want:

@@ -63,8 +63,11 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/w" -w /w/src censor-proxy \
   python tools/draw_boxes.py /w/docs/samples /w/review
 ```
 
-Once the boxes are confirmed, copy `review/detections.json` to
-`tests/fixtures/expected.json` to make it the regression fixture.
+Add `--config FILE` to review with a different model. Once the boxes are
+confirmed, copy `review/detections.json` to
+`tests/fixtures/expected-<model>.json` (`640m` or `320n`) to make it that
+model's regression fixture; `tests/test_samples.py` checks each fixture with
+its own model, whatever the configured default.
 
 ## Test
 
