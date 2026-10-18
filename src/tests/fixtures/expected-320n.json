@@ -1,0 +1,622 @@
+[
+  {
+    "file": "censor/made-to-be-thrown-around-f-v0-qjqk8ekfn2wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.788,
+        "box": [
+          259,
+          448,
+          107,
+          110
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.767,
+        "box": [
+          313,
+          549,
+          103,
+          92
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.396,
+        "box": [
+          366,
+          444,
+          77,
+          99
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.283,
+        "box": [
+          323,
+          243,
+          86,
+          95
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/mirror-mirror-on-the-wall-whos-the-sluttiest-of-them-all-f-v0-yflug2n0n0wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.787,
+        "box": [
+          212,
+          237,
+          186,
+          262
+        ],
+        "censor": true,
+        "why": "near FEMALE_GENITALIA_EXPOSED"
+      },
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.697,
+        "box": [
+          225,
+          359,
+          57,
+          46
+        ],
+        "censor": true,
+        "why": "female label"
+      },
+      {
+        "label": "FEET_COVERED",
+        "score": 0.293,
+        "box": [
+          0,
+          283,
+          26,
+          91
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/so-needy-for-you-f-v0-7wq6k0ov05wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.639,
+        "box": [
+          86,
+          138,
+          355,
+          533
+        ],
+        "censor": true,
+        "why": "female label"
+      }
+    ]
+  },
+  {
+    "file": "censor/spending-all-of-saturday-playing-like-this-f-v0-633xaly063wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.816,
+        "box": [
+          216,
+          263,
+          208,
+          210
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.798,
+        "box": [
+          231,
+          0,
+          191,
+          116
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.789,
+        "box": [
+          172,
+          493,
+          251,
+          341
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.76,
+        "box": [
+          57,
+          268,
+          150,
+          182
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_GENITALIA_COVERED",
+        "score": 0.646,
+        "box": [
+          304,
+          830,
+          122,
+          145
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.619,
+        "box": [
+          424,
+          284,
+          90,
+          151
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "censor/want-to-suck-on-my-tits-or-my-clit-f-v0-rm3wgjgq12wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.853,
+        "box": [
+          6,
+          258,
+          228,
+          211
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.788,
+        "box": [
+          229,
+          139,
+          231,
+          232
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.782,
+        "box": [
+          37,
+          101,
+          180,
+          147
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_GENITALIA_COVERED",
+        "score": 0.599,
+        "box": [
+          473,
+          118,
+          110,
+          121
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "mixed/cum-covered-back-v0-s6284nahhawh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.827,
+        "box": [
+          1,
+          1036,
+          974,
+          674
+        ],
+        "censor": true,
+        "why": "unattributed"
+      },
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.487,
+        "box": [
+          613,
+          2005,
+          261,
+          390
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEET_EXPOSED",
+        "score": 0.347,
+        "box": [
+          402,
+          2003,
+          251,
+          392
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "mixed/daddy-said-i-look-better-as-a-doll-v0-go3cqahf2awh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.845,
+        "box": [
+          355,
+          186,
+          207,
+          236
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.53,
+        "box": [
+          400,
+          635,
+          206,
+          238
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_COVERED",
+        "score": 0.514,
+        "box": [
+          162,
+          625,
+          234,
+          267
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ],
+    "xfail": "320n scores both exposed breasts as FEMALE_BREAST_COVERED"
+  },
+  {
+    "file": "mixed/what-kinda-cage-should-i-get-v0-nvv7ulwwg5wh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.823,
+        "box": [
+          351,
+          386,
+          680,
+          910
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.689,
+        "box": [
+          119,
+          1221,
+          562,
+          614
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.624,
+        "box": [
+          760,
+          36,
+          319,
+          410
+        ],
+        "censor": false,
+        "why": "below threshold 0.65, male context only"
+      }
+    ],
+    "xfail": "320n finds one breast at 0.62, inside the score range of the uncensor/rub-an-irish false positive"
+  },
+  {
+    "file": "uncensor/48-straight-pick-your-favorite-v0-ond5zf7vyyvh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.423,
+        "box": [
+          329,
+          633,
+          185,
+          186
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FACE_MALE",
+        "score": 0.318,
+        "box": [
+          274,
+          0,
+          174,
+          50
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/being-locked-makes-me-feel-so-pathetic-and-addicted-to-v0-fdtqk6jal9wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.655,
+        "box": [
+          20,
+          933,
+          636,
+          717
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEET_COVERED",
+        "score": 0.39,
+        "box": [
+          840,
+          29,
+          221,
+          326
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/completely-helpless-waiting-for-you-to-take-over-v0-xoahabrna9wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.821,
+        "box": [
+          148,
+          277,
+          174,
+          184
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.62,
+        "box": [
+          603,
+          551,
+          236,
+          370
+        ],
+        "censor": false,
+        "why": "near MALE_GENITALIA_EXPOSED only"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.374,
+        "box": [
+          475,
+          726,
+          202,
+          119
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "ANUS_EXPOSED",
+        "score": 0.372,
+        "box": [
+          709,
+          711,
+          69,
+          68
+        ],
+        "censor": false,
+        "why": "below threshold"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/covered-or-exposed-v0-okpp95b7m5wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.761,
+        "box": [
+          24,
+          402,
+          445,
+          220
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/getting-ready-for-football-v0-0g97qd4q98wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.732,
+        "box": [
+          242,
+          837,
+          385,
+          437
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.37,
+        "box": [
+          107,
+          498,
+          97,
+          148
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.258,
+        "box": [
+          219,
+          0,
+          382,
+          224
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/is-he-beautiful-v0-gv1o2f9vbwvh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.691,
+        "box": [
+          222,
+          210,
+          234,
+          252
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.592,
+        "box": [
+          0,
+          0,
+          287,
+          209
+        ],
+        "censor": false,
+        "why": "near MALE_GENITALIA_EXPOSED only"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/rub-an-irish-cock-hard-enough-your-dreams-might-come-true-28-v0-x6xjq3zrv2wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.63,
+        "box": [
+          0,
+          142,
+          251,
+          371
+        ],
+        "censor": false,
+        "why": "below threshold 0.65, male context only"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.602,
+        "box": [
+          454,
+          209,
+          483,
+          333
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.398,
+        "box": [
+          231,
+          94,
+          399,
+          415
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  }
+]

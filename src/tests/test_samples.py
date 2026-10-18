@@ -2,8 +2,9 @@
 
 Each tests/fixtures/expected-<model>.json is a tools/draw_boxes.py run that
 was confirmed by eye, and is checked with that model regardless of the
-configured default. Needs the model weights (run inside the Docker image)
-and the sample images, which are not in git.
+configured default. Known failures stay in the fixture, marked "xfail".
+Needs the model weights (run inside the Docker image) and the sample
+images, which are not in git.
 """
 
 import json
@@ -63,7 +64,11 @@ def censors(tmp_path_factory):
 
 
 @pytest.mark.parametrize("model,case", CASES)
-def test_sample(censors, model, case):
+def test_sample(censors, model, case, request):
+    # A fixture entry may carry "xfail": a known failure of that model, with
+    # "action" set to the correct result. Strict, so a fix is noticed.
+    if reason := case.get("xfail"):
+        request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
     result = censors(model).censor_bytes((SAMPLES / case["file"]).read_bytes())
     assert result.action == case["action"]
     got = [[d.detection.box.x, d.detection.box.y, d.detection.box.w, d.detection.box.h]

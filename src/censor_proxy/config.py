@@ -40,6 +40,7 @@ class DetectionConfig:
     female_context_labels: frozenset[str]
     male_context_labels: frozenset[str]
     context_threshold: float
+    overlap_context_threshold: float
     proximity: float
     male_context_exempts: bool
 
@@ -129,6 +130,7 @@ def _build(raw: dict[str, Any]) -> Config:
             female_context_labels=frozenset(d["female_context_labels"]),
             male_context_labels=frozenset(d["male_context_labels"]),
             context_threshold=float(d["context_threshold"]),
+            overlap_context_threshold=float(d["overlap_context_threshold"]),
             proximity=float(d["proximity"]),
             male_context_exempts=bool(d["male_context_exempts"]),
         ),

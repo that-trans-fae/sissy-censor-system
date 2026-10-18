@@ -100,3 +100,18 @@ def test_other_female_evidence_keeps_normal_threshold_with_male_present(cfg):
                  det("FACE_FEMALE", 0.8, (500, 0, 50, 50)),
                  det("MALE_GENITALIA_EXPOSED", 0.72, (300, 300, 100, 100))], cfg.detection)
     assert censored(ds) == ["FEMALE_BREAST_EXPOSED"]
+
+
+def test_weak_female_inside_unsexed_box_overrides_male_exemption(cfg):
+    ds = decide([det("BUTTOCKS_EXPOSED", 0.85, (0, 1000, 975, 700)),
+                 det("MALE_GENITALIA_EXPOSED", 0.7, (400, 1980, 260, 410)),
+                 det("FEMALE_GENITALIA_EXPOSED", 0.26, (420, 1480, 110, 150))], cfg.detection)
+    assert censored(ds) == ["BUTTOCKS_EXPOSED"]
+    assert ds[0].reason == "overlaps FEMALE_GENITALIA_EXPOSED 0.26"
+
+
+def test_weak_female_must_overlap_to_override(cfg):
+    ds = decide([det("BUTTOCKS_EXPOSED", 0.85, (0, 0, 100, 100)),
+                 det("MALE_GENITALIA_EXPOSED", 0.7, (100, 0, 50, 50)),
+                 det("FACE_FEMALE", 0.26, (130, 0, 30, 30))], cfg.detection)
+    assert censored(ds) == []

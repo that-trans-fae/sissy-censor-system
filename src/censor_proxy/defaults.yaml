@@ -48,7 +48,11 @@ detection:
     - MALE_GENITALIA_EXPOSED
     - MALE_BREAST_EXPOSED
   # Minimum score for a context detection to count.
-  context_threshold: 0.4
+  context_threshold: 0.35
+  # Female context that overlaps an unsexed box counts from this lower score
+  # and overrides male_context_exempts (e.g. weak female genitalia inside a
+  # buttocks box that also sits near a male detection).
+  overlap_context_threshold: 0.25
   # Boxes are "near" when the gap between them is at most this fraction of
   # the unsexed box's longer side. 0 means they must overlap.
   proximity: 0.5

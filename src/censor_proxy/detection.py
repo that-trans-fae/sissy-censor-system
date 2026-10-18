@@ -90,11 +90,15 @@ def decide(detections: list[Detection], cfg: DetectionConfig) -> list[Decision]:
     lower when the box touches a confident female detection (e.g. the second
     breast of a pair), higher when nothing else in the image is female but
     male context is present. Unsexed labels are censored unless the box is
-    near male context and not near female context (and male_context_exempts
-    is on). Everything else passes.
+    near male context, not near female context, and not overlapping even
+    weak female context (and male_context_exempts is on). Everything else
+    passes.
     """
     female_ctx = [d for d in detections
                   if d.label in cfg.female_context_labels and d.score >= cfg.context_threshold]
+    weak_female_ctx = [d for d in detections
+                       if d.label in cfg.female_context_labels
+                       and d.score >= cfg.overlap_context_threshold]
     male_ctx = [d for d in detections
                 if d.label in cfg.male_context_labels and d.score >= cfg.context_threshold]
     confident_female = [d for d in detections
@@ -126,6 +130,8 @@ def decide(detections: list[Detection], cfg: DetectionConfig) -> list[Decision]:
             decisions.append(Decision(d, False, "below threshold"))
         elif f := near(d, female_ctx):
             decisions.append(Decision(d, True, f"near {f.label}"))
+        elif f := next((c for c in weak_female_ctx if d.box.gap(c.box) == 0), None):
+            decisions.append(Decision(d, True, f"overlaps {f.label} {f.score:.2f}"))
         elif cfg.male_context_exempts and (m := near(d, male_ctx)):
             decisions.append(Decision(d, False, f"near {m.label} only"))
         else:

@@ -246,6 +246,90 @@
     ]
   },
   {
+    "file": "mixed/cum-covered-back-v0-s6284nahhawh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "BUTTOCKS_EXPOSED",
+        "score": 0.847,
+        "box": [
+          7,
+          1033,
+          975,
+          693
+        ],
+        "censor": true,
+        "why": "overlaps FEMALE_GENITALIA_EXPOSED 0.26"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.706,
+        "box": [
+          399,
+          1983,
+          260,
+          413
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_GENITALIA_EXPOSED",
+        "score": 0.26,
+        "box": [
+          422,
+          1481,
+          107,
+          149
+        ],
+        "censor": false,
+        "why": "below threshold 0.65, male context only"
+      }
+    ]
+  },
+  {
+    "file": "mixed/daddy-said-i-look-better-as-a-doll-v0-go3cqahf2awh1.webp",
+    "action": "censored",
+    "detections": [
+      {
+        "label": "FACE_FEMALE",
+        "score": 0.885,
+        "box": [
+          349,
+          165,
+          220,
+          279
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.664,
+        "box": [
+          164,
+          625,
+          226,
+          265
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      },
+      {
+        "label": "FEMALE_BREAST_EXPOSED",
+        "score": 0.642,
+        "box": [
+          399,
+          611,
+          188,
+          237
+        ],
+        "censor": true,
+        "why": "female label, corroborated by FEMALE_BREAST_EXPOSED"
+      }
+    ]
+  },
+  {
     "file": "mixed/what-kinda-cage-should-i-get-v0-nvv7ulwwg5wh1.webp",
     "action": "censored",
     "detections": [
@@ -330,6 +414,36 @@
     ]
   },
   {
+    "file": "uncensor/being-locked-makes-me-feel-so-pathetic-and-addicted-to-v0-fdtqk6jal9wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.611,
+        "box": [
+          25,
+          925,
+          607,
+          655
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "FEET_COVERED",
+        "score": 0.507,
+        "box": [
+          854,
+          27,
+          201,
+          325
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
     "file": "uncensor/completely-helpless-waiting-for-you-to-take-over-v0-xoahabrna9wh1.webp",
     "action": "clean",
     "detections": [
@@ -395,6 +509,48 @@
           387,
           467,
           273
+        ],
+        "censor": false,
+        "why": "label not censored"
+      }
+    ]
+  },
+  {
+    "file": "uncensor/getting-ready-for-football-v0-0g97qd4q98wh1.webp",
+    "action": "clean",
+    "detections": [
+      {
+        "label": "BELLY_EXPOSED",
+        "score": 0.78,
+        "box": [
+          264,
+          840,
+          355,
+          432
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "MALE_GENITALIA_EXPOSED",
+        "score": 0.519,
+        "box": [
+          265,
+          1351,
+          218,
+          418
+        ],
+        "censor": false,
+        "why": "label not censored"
+      },
+      {
+        "label": "ARMPITS_EXPOSED",
+        "score": 0.257,
+        "box": [
+          116,
+          495,
+          84,
+          140
         ],
         "censor": false,
         "why": "label not censored"
