@@ -15,7 +15,7 @@ Answers to the open questions in the project handoff, settled Oct 18, 2026.
 | Unsexed attribution tweaks | A female detection overlapping an unsexed box counts from 0.25 and overrides the male exemption (`mixed/cum-covered-back`: a woman's buttocks next to a male detection). Context detections count from 0.35, not 0.4 (fixes `uncensor/completely-helpless` under 320n; no change under 640m). |
 | Pre-filter | OpenNSFW2 dropped (it pulls in TensorFlow). NudeNet runs on every image above the size floor; repeat images are served from a content-hash cache. |
 | Log contents | Hostnames by default. Full URLs are logged only at the more verbose level. Configurable. |
-| Browsers | Firefox and Chromium (probably both snaps). CA trust for each to be worked through together. |
+| Browsers | Firefox and Chromium (both snaps). Chromium trusts the CA through the `CACertificates` policy in `/var/snap/chromium/current/policies/managed/`; its updater hosts are passed through. Verified with a test profile on live HTTPS (Reddit images censored in 76-294 ms with 320n). Still to do: system-wide proxy via the PAC file, and Firefox. |
 | Fail-open when container is down | Use a PAC file (`PROXY localhost:8080; DIRECT`) rather than relying on a health check. |
 | Test fixtures | Run NudeNet on `docs/samples/`, draw the boxes, and have them confirmed by hand before freezing them as expected results. |
 | Layout | Code in `src/` next to `docs/`; git repo at the project root. |

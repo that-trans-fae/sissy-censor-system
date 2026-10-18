@@ -10,4 +10,8 @@ logging:
 proxy:
   # Hosts that bypass TLS interception (regexes on host:port), e.g. for
   # certificate-pinned clients.
-  passthrough_hosts: []
+  passthrough_hosts:
+    # Chromium background services that don't honour the CACertificates
+    # policy. No page images come from them.
+    - '^update\.googleapis\.com:'
+    - '^optimizationguide-pa\.googleapis\.com:'

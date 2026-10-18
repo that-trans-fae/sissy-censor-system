@@ -39,8 +39,39 @@ sudo cp mitmproxy/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/mitmpro
 sudo update-ca-certificates
 ```
 
-Firefox and Chromium (both snaps here) keep their own stores; setting those up
-is still to do.
+### Chromium (snap)
+
+Trust the CA with the `CACertificates` policy, which covers every profile.
+Adding it to the snap's NSS database with `certutil` is not enough: Chromium
+lists it as an intermediate, not a trusted root. Generate the policy from your
+CA and install it:
+
+```bash
+printf '{\n  "CACertificates": ["%s"]\n}\n' "$(openssl x509 -in mitmproxy/mitmproxy-ca-cert.pem -outform DER | base64 -w0)" > mitmproxy/chromium-policy.json
+```
+
+```bash
+sudo mkdir -p /var/snap/chromium/current/policies/managed
+```
+
+```bash
+sudo cp mitmproxy/chromium-policy.json /var/snap/chromium/current/policies/managed/censor-proxy.json
+```
+
+Restart Chromium and check `chrome://policy` shows `CACertificates` as OK. To
+try it without changing system settings, use a separate test profile:
+
+```bash
+chromium --user-data-dir=$HOME/snap/chromium/common/censor-test --proxy-server=127.0.0.1:8080
+```
+
+Chromium's component updater ignores the policy, so `update.googleapis.com`
+and `optimizationguide-pa.googleapis.com` are in the passthrough list in
+`config/config.yaml`.
+
+### Firefox (snap)
+
+Still to do.
 
 ## Configure
 
