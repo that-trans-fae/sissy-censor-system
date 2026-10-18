@@ -1,0 +1,13 @@
+# User overrides, mounted at /config/config.yaml. Only list what you change;
+# every key and its default is documented in censor_proxy/defaults.yaml.
+
+censor:
+  style: gaussian          # gaussian | pixelate | solid
+
+logging:
+  level: info              # off | info (hostnames) | debug (full URLs)
+
+proxy:
+  # Hosts that bypass TLS interception (regexes on host:port), e.g. for
+  # certificate-pinned clients.
+  passthrough_hosts: []

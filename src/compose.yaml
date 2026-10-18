@@ -1,0 +1,13 @@
+services:
+  censor-proxy:
+    build: .
+    image: censor-proxy
+    restart: unless-stopped
+    ports:
+      # Loopback only: never expose an intercepting proxy to the LAN.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Keeps the CA stable across rebuilds, so trust is installed once.
+      - ./mitmproxy:/root/.mitmproxy
+      - ./config:/config:ro
+      - ./logs:/logs

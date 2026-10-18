@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Model weights are fetched at image build time (see src/Dockerfile)
+src/models/*.onnx
+
+# mitmproxy CA and runtime state; never commit the CA private key
+mitmproxy/
+logs/
+
+# Box-draw review output
+review/
+
+# Sample images stay local; tests/test_samples.py skips without them
+docs/samples/

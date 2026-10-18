@@ -1,0 +1,106 @@
+# Default configuration. A user config file (CENSOR_CONFIG, default
+# /config/config.yaml) is deep-merged over this, so it only needs the keys
+# it changes. Unknown keys are rejected so typos fail loudly at startup.
+
+model:
+  # ONNX weights. null uses the 320n model bundled with the nudenet package
+  # (~10x faster, noticeably less accurate). The Docker image bakes in 640m.
+  path: /app/models/640m.onnx
+  # Must match the model: 640 for 640m, 320 for 320n.
+  resolution: 640
+  # Concurrent inference workers, and onnxruntime threads per worker.
+  workers: 2
+  threads_per_worker: 4
+
+detection:
+  # Minimum score for a box to be censored.
+  threshold: 0.5
+  # Per-label overrides of `threshold`, e.g. {FEMALE_BREAST_EXPOSED: 0.6}.
+  label_thresholds: {}
+  # Context adjusts the threshold for female labels:
+  # - a box near (see `proximity`) another female-label box that is above its
+  #   own threshold needs only corroborated_threshold, e.g. the second breast
+  #   of a pair;
+  # - a box with no other female context anywhere in the image, while male
+  #   context is present, needs male_context_threshold, e.g. a male chest
+  #   misread as female. Set it equal to `threshold` to disable.
+  corroborated_threshold: 0.35
+  male_context_threshold: 0.65
+  # Always censored when above threshold.
+  female_labels:
+    - FEMALE_BREAST_EXPOSED
+    - FEMALE_GENITALIA_EXPOSED
+  # Not sex-specific. Censored unless attributable to a male subject only.
+  unsexed_labels:
+    - BUTTOCKS_EXPOSED
+    - ANUS_EXPOSED
+  # Detections used to attribute an unsexed box to a sex. They are never
+  # censored themselves unless they also appear in female_labels.
+  female_context_labels:
+    - FACE_FEMALE
+    - FEMALE_BREAST_EXPOSED
+    - FEMALE_GENITALIA_EXPOSED
+    - FEMALE_BREAST_COVERED
+    - FEMALE_GENITALIA_COVERED
+  male_context_labels:
+    - FACE_MALE
+    - MALE_GENITALIA_EXPOSED
+    - MALE_BREAST_EXPOSED
+  # Minimum score for a context detection to count.
+  context_threshold: 0.4
+  # Boxes are "near" when the gap between them is at most this fraction of
+  # the unsexed box's longer side. 0 means they must overlap.
+  proximity: 0.5
+  # When an unsexed box is near male context and no female context, pass it.
+  # false censors every unsexed box regardless.
+  male_context_exempts: true
+
+censor:
+  # gaussian | pixelate | solid
+  style: gaussian
+  # Each box grows by this fraction of its size on every side.
+  padding: 0.10
+  # gaussian: kernel size as a fraction of the box's longer side.
+  blur_strength: 0.5
+  # pixelate: number of blocks across the box's longer side.
+  pixel_blocks: 10
+  # solid: fill colour as [R, G, B].
+  fill_color: [0, 0, 0]
+  # If detection errors or exceeds timeout_seconds, censor the whole image
+  # (true) or deliver it unmodified (false).
+  fail_closed: true
+  timeout_seconds: 20
+  # Re-encode quality for lossy formats (JPEG, lossy WebP).
+  quality: 90
+
+images:
+  # Images smaller than this many bytes, or with a shorter side under
+  # min_side_px, pass through unscanned.
+  size_floor_bytes: 4096
+  min_side_px: 64
+  # Image responses larger than this are streamed through unscanned.
+  max_bytes: 26214400
+  # Animated images: run detection on every Nth frame; skipped frames get the
+  # union of the boxes from the sampled frames either side.
+  frame_step: 2
+  # Animations with more frames than this are fail-closed rather than scanned.
+  max_frames: 600
+
+proxy:
+  # Regexes matched against host:port. Matching hosts bypass TLS
+  # interception entirely (mitmproxy ignore_hosts).
+  passthrough_hosts: []
+  # Hostname the addon answers on for GET /health.
+  health_host: censor.local
+
+cache:
+  # Content-hash cache of scan results. 0 disables it.
+  max_entries: 1024
+
+logging:
+  # off | info | debug. info logs hostnames; debug adds full URLs.
+  level: info
+  # JSONL detection log. Rotated at max_bytes, keeping `backups` old files.
+  path: /logs/detections.jsonl
+  max_bytes: 10485760
+  backups: 5

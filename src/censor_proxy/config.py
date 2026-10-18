@@ -1,0 +1,177 @@
+"""Configuration: packaged defaults deep-merged with an optional user YAML file."""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+DEFAULTS_PATH = Path(__file__).with_name("defaults.yaml")
+CONFIG_ENV = "CENSOR_CONFIG"
+
+CENSOR_STYLES = ("gaussian", "pixelate", "solid")
+LOG_LEVELS = ("off", "info", "debug")
+
+
+class ConfigError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    path: str | None
+    resolution: int
+    workers: int
+    threads_per_worker: int
+
+
+@dataclass(frozen=True)
+class DetectionConfig:
+    threshold: float
+    label_thresholds: dict[str, float]
+    corroborated_threshold: float
+    male_context_threshold: float
+    female_labels: frozenset[str]
+    unsexed_labels: frozenset[str]
+    female_context_labels: frozenset[str]
+    male_context_labels: frozenset[str]
+    context_threshold: float
+    proximity: float
+    male_context_exempts: bool
+
+    def threshold_for(self, label: str) -> float:
+        return self.label_thresholds.get(label, self.threshold)
+
+
+@dataclass(frozen=True)
+class CensorConfig:
+    style: str
+    padding: float
+    blur_strength: float
+    pixel_blocks: int
+    fill_color: tuple[int, int, int]
+    fail_closed: bool
+    timeout_seconds: float
+    quality: int
+
+
+@dataclass(frozen=True)
+class ImagesConfig:
+    size_floor_bytes: int
+    min_side_px: int
+    max_bytes: int
+    frame_step: int
+    max_frames: int
+
+
+@dataclass(frozen=True)
+class ProxyConfig:
+    passthrough_hosts: tuple[str, ...]
+    health_host: str
+
+
+@dataclass(frozen=True)
+class CacheConfig:
+    max_entries: int
+
+
+@dataclass(frozen=True)
+class LoggingConfig:
+    level: str
+    path: str | None
+    max_bytes: int
+    backups: int
+
+
+@dataclass(frozen=True)
+class Config:
+    model: ModelConfig
+    detection: DetectionConfig
+    censor: CensorConfig
+    images: ImagesConfig
+    proxy: ProxyConfig
+    cache: CacheConfig
+    logging: LoggingConfig
+
+
+def _merge(defaults: dict, override: dict) -> dict:
+    """Merge section by section. Values inside a section (including lists and
+    label_thresholds) replace the default wholesale."""
+    out = {}
+    for section, values in override.items():
+        if section not in defaults:
+            raise ConfigError(f"unknown config section: {section}")
+        if not isinstance(values, dict):
+            raise ConfigError(f"config section {section} must be a mapping")
+        for key in values:
+            if key not in defaults[section]:
+                raise ConfigError(f"unknown config key: {section}.{key}")
+        out[section] = {**defaults[section], **values}
+    return {**defaults, **out}
+
+
+def _build(raw: dict[str, Any]) -> Config:
+    d = raw["detection"]
+    c = raw["censor"]
+    sections = {
+        "model": ModelConfig(**raw["model"]),
+        "detection": DetectionConfig(
+            threshold=float(d["threshold"]),
+            label_thresholds={str(k): float(v) for k, v in (d["label_thresholds"] or {}).items()},
+            corroborated_threshold=float(d["corroborated_threshold"]),
+            male_context_threshold=float(d["male_context_threshold"]),
+            female_labels=frozenset(d["female_labels"]),
+            unsexed_labels=frozenset(d["unsexed_labels"]),
+            female_context_labels=frozenset(d["female_context_labels"]),
+            male_context_labels=frozenset(d["male_context_labels"]),
+            context_threshold=float(d["context_threshold"]),
+            proximity=float(d["proximity"]),
+            male_context_exempts=bool(d["male_context_exempts"]),
+        ),
+        "censor": CensorConfig(**{**c, "fill_color": tuple(c["fill_color"])}),
+        "images": ImagesConfig(**raw["images"]),
+        "proxy": ProxyConfig(
+            passthrough_hosts=tuple(raw["proxy"]["passthrough_hosts"] or ()),
+            health_host=raw["proxy"]["health_host"],
+        ),
+        "cache": CacheConfig(**raw["cache"]),
+        "logging": LoggingConfig(**raw["logging"]),
+    }
+    cfg = Config(**sections)
+    _validate(cfg)
+    return cfg
+
+
+def _validate(cfg: Config) -> None:
+    if cfg.censor.style not in CENSOR_STYLES:
+        raise ConfigError(f"censor.style must be one of {CENSOR_STYLES}, got {cfg.censor.style!r}")
+    if cfg.logging.level not in LOG_LEVELS:
+        raise ConfigError(f"logging.level must be one of {LOG_LEVELS}, got {cfg.logging.level!r}")
+    if cfg.images.frame_step < 1:
+        raise ConfigError("images.frame_step must be >= 1")
+    if not 1 <= cfg.censor.quality <= 100:
+        raise ConfigError("censor.quality must be between 1 and 100")
+    if len(cfg.censor.fill_color) != 3:
+        raise ConfigError("censor.fill_color must be [R, G, B]")
+    for pattern in cfg.proxy.passthrough_hosts:
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise ConfigError(f"proxy.passthrough_hosts: bad regex {pattern!r}: {e}") from e
+
+
+def load_config(path: str | os.PathLike | None = None) -> Config:
+    """Load defaults, then merge the user file at `path` (or $CENSOR_CONFIG) if it exists."""
+    raw = yaml.safe_load(DEFAULTS_PATH.read_text())
+    if path is None:
+        path = os.environ.get(CONFIG_ENV)
+    if path and Path(path).is_file():
+        override = yaml.safe_load(Path(path).read_text()) or {}
+        if not isinstance(override, dict):
+            raise ConfigError(f"{path}: top level must be a mapping")
+        raw = _merge(raw, override)
+    return _build(raw)

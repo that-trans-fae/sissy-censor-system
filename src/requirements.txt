@@ -1,0 +1,8 @@
+mitmproxy==12.2.3
+nudenet==3.4.2
+onnxruntime==1.31.0
+opencv-python-headless==5.0.0.93
+pillow==13.0.0
+numpy==2.5.4
+pyyaml==6.0.3
+selectolax==1.0.1
