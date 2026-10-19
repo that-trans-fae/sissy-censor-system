@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from dataclasses import dataclass
@@ -67,6 +68,9 @@ class ImagesConfig:
     size_floor_bytes: int
     min_side_px: int
     strip_accept: frozenset[str]
+    sniff_image_requests: bool
+    sniff_types: frozenset[str]
+    sniff_max_bytes: int
     max_bytes: int
     max_decoded_bytes: int
     frame_step: int
@@ -79,6 +83,13 @@ class DataUrisConfig:
     enabled: bool
     content_types: frozenset[str]
     max_body_bytes: int
+    svg_depth: int
+
+    def matches(self, mime: str) -> bool:
+        """Whether a Content-Type (no parameters) is scanned. Entries may be
+        globs, e.g. application/*+json."""
+        return mime in self.content_types or any(
+            fnmatch.fnmatchcase(mime, t) for t in self.content_types if "*" in t)
 
 
 @dataclass(frozen=True)
@@ -176,12 +187,16 @@ def _build(raw: dict[str, Any]) -> Config:
             male_context_exempts=bool(d["male_context_exempts"]),
         ),
         "censor": CensorConfig(**{**c, "fill_color": tuple(c["fill_color"])}),
-        "images": ImagesConfig(**{**raw["images"], "strip_accept": frozenset(
-            t.lower() for t in raw["images"]["strip_accept"] or ())}),
+        "images": ImagesConfig(**{
+            **raw["images"],
+            "strip_accept": frozenset(t.lower() for t in raw["images"]["strip_accept"] or ()),
+            "sniff_types": frozenset((t or "").lower() for t in raw["images"]["sniff_types"] or ()),
+        }),
         "data_uris": DataUrisConfig(
             enabled=bool(raw["data_uris"]["enabled"]),
             content_types=frozenset(t.lower() for t in raw["data_uris"]["content_types"] or ()),
             max_body_bytes=int(raw["data_uris"]["max_body_bytes"]),
+            svg_depth=int(raw["data_uris"]["svg_depth"]),
         ),
         "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ())}),
         "proxy": ProxyConfig(

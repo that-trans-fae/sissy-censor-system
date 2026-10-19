@@ -4,7 +4,9 @@ Levels:
   off    nothing is written
   info   images with an explicit-region detection (censored or not), and
          every fail-closed or error; hostname only
-  debug  every image response, including skipped ones, with the full URL
+  debug  every image response, including skipped ones, with the full URL,
+         and every response requested as an image (Sec-Fetch-Dest: image)
+         that wasn't scanned, as action "unscanned" with the reason
 """
 
 from __future__ import annotations

@@ -2,6 +2,7 @@
 proxy actually buffers and scans (unit tests call censor_bytes directly and
 can't see mitmproxy's streaming decisions)."""
 
+import base64
 import io
 import json
 import shutil
@@ -37,6 +38,18 @@ def site(tmp_path):
     (root / "page.html").write_text("<!doctype html><html><head><title>t</title></head><body></body></html>")
     (root / "blob.bin").write_bytes(b"\0" * 1024)
     (root / "clip.mp4").write_bytes(b"\0\0\0\x18ftypmp42" + b"\0" * 200_000)
+    # Real images behind labels that don't say image, and an SVG and a script
+    # carrying a base64 PNG.
+    noise = rng.integers(0, 256, (200, 240, 3), dtype=np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(noise).save(buf, "PNG")
+    small = buf.getvalue()
+    (root / "image.bin").write_bytes(small)
+    (root / "image.txt").write_bytes(small)
+    embedded = b"data:image/png;charset=utf-8;base64," + base64.b64encode(small)
+    (root / "ad.svg").write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"><image href="'
+                                  + embedded + b'"/></svg>')
+    (root / "ad.js").write_bytes(b'var creative = "' + embedded + b'";')
     handler = lambda *a, **k: SimpleHTTPRequestHandler(*a, directory=str(root), **k)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -108,6 +121,44 @@ def test_video_opened_directly_becomes_control_page(site, proxy):
     # The same URL loaded by a <video> element passes through untouched.
     req = urllib.request.Request(base + "/clip.mp4", headers={"Sec-Fetch-Dest": "video"})
     assert opener.open(req, timeout=30).read() == (root / "clip.mp4").read_bytes()
+
+
+def test_mislabelled_images_are_sniffed_and_scanned(site, proxy):
+    root, base = site
+    opener, log = proxy
+    # application/octet-stream: sniffed on any request.
+    assert opener.open(base + "/image.bin", timeout=30).read() == (root / "image.bin").read_bytes()
+    # text/plain: sniffed when the browser asked for an image.
+    req = urllib.request.Request(base + "/image.txt", headers={"Sec-Fetch-Dest": "image"})
+    opener.open(req, timeout=30).read()
+    scanned = {e["url"].rsplit("/", 1)[1]: e for e in entries(log)}
+    for name in ("image.bin", "image.txt"):
+        assert scanned[name]["source"] == "sniffed" and scanned[name]["action"] == "clean"
+        assert scanned[name]["mime"] == "image/png"
+
+
+def test_svg_and_script_data_uris_scanned(site, proxy):
+    root, base = site
+    opener, log = proxy
+    for name in ("ad.svg", "ad.js"):
+        opener.open(base + "/" + name, timeout=30).read()
+    found = [e["url"].rsplit("/", 1)[1] for e in entries(log) if e.get("source") == "data-uri"]
+    assert sorted(found) == ["ad.js", "ad.svg"]
+
+
+def test_unscanned_image_requests_logged(site, proxy):
+    root, base = site
+    opener, log = proxy
+    for path in ("/missing.png", "/page.html"):
+        req = urllib.request.Request(base + path, headers={"Sec-Fetch-Dest": "image"})
+        try:
+            opener.open(req, timeout=30).read()
+        except urllib.error.HTTPError:
+            pass
+    reasons = {e["url"].rsplit("/", 1)[1]: e["reason"] for e in entries(log)
+               if e["action"] == "unscanned"}
+    assert reasons == {"missing.png": "streamed (status 404)",
+                       "page.html": "no supported image found (Content-Type text/html)"}
 
 
 def test_strip_accept():

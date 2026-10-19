@@ -5,7 +5,7 @@ import pytest
 from conftest import FakeDetector, det
 from PIL import Image
 
-from censor_proxy.imaging import Censor
+from censor_proxy.imaging import MIME_FORMATS, Censor, sniff
 
 
 def noise(w=200, h=160, mode="RGB", seed=0):
@@ -153,3 +153,17 @@ def test_oversized_animation_fails_closed_to_first_frame(make_config, limit):
     out = Image.open(io.BytesIO(result.data))
     assert out.format == "GIF" and getattr(out, "n_frames", 1) == 1
     assert (np.abs(decode(original) - decode(result.data)).sum(axis=2) > 0).mean() > 0.9
+
+
+@pytest.mark.parametrize("fmt", ["JPEG", "PNG", "GIF", "WEBP", "AVIF"])
+def test_sniff_recognises_supported_formats(fmt):
+    assert MIME_FORMATS[sniff(encode(noise(), fmt))] == fmt
+
+
+def test_sniff_avif_compatible_brand_and_non_images():
+    ftyp = (24).to_bytes(4, "big") + b"ftypmif1" + b"\0\0\0\0" + b"mif1avif"
+    assert sniff(ftyp + b"\0" * 32) == "image/avif"
+    mp4 = (24).to_bytes(4, "big") + b"ftypisom" + b"\0\0\0\0" + b"isommp41"
+    assert sniff(mp4 + b"\0" * 32) is None
+    assert sniff(b"\xff\x0a" + b"\0" * 32) is None  # JPEG XL codestream
+    assert sniff(b"<html>") is None and sniff(b"") is None

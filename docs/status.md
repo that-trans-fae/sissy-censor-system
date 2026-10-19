@@ -20,6 +20,11 @@ Last updated Oct 18, 2026.
   profile
 - Data URIs: base64 images in HTML, CSS and JSON (including JSON-escaped
   slashes) are censored in place through the same `censor_bytes()`
+- Mislabelled and embedded images: images sniffed by signature when the
+  Content-Type doesn't say image (octet-stream, missing, or anything
+  requested as an image); data URIs in JavaScript, XML, SVG and plain text,
+  with parameters and any case, including images inside base64 SVGs;
+  `unscanned` debug log entries for image requests that weren't scanned
 - Recall tuning: tiling of tall/wide images and lower thresholds (false
   positives preferred to misses)
 - Branding: mark, palette and README banners in `docs/brand/`; the video

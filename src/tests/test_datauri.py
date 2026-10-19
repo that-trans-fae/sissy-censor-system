@@ -112,3 +112,60 @@ def test_jpeg_mime_variants_found():
 
 def test_escaped_mime_slash_found():
     assert [m.group(1) for m in find(b'"data:image\\/png;base64,AAAA"')] == [b"png"]
+
+
+def test_parameters_and_case_found():
+    body = (b"data:image/png;charset=utf-8;base64,AAAA DATA:IMAGE/JPEG;BASE64,BBBB "
+            b"data:image/webp;name=a.webp;foo=bar;base64,CCCC data:image/png;utf8,DDDD")
+    assert [(m.group(1), m.group(2)) for m in find(body)] == \
+        [(b"png", b"AAAA"), (b"JPEG", b"BBBB"), (b"webp", b"CCCC")]
+
+
+def test_parameterised_uri_censored_in_place(censor):
+    data = png(5)
+    body = b'<img src="data:image/png;charset=utf-8;base64,' + base64.b64encode(data) + b'">'
+    result = censor_data_uris(body, censor, fail_closed=True)
+    assert result.changed and result.results[0][0] == "image/png"
+    assert result.body.startswith(b'<img src="data:image/png;charset=utf-8;base64,')
+    assert payloads(result.body)[0] != data
+
+
+def svg_with(*images):
+    return (b'<svg xmlns="http://www.w3.org/2000/svg">'
+            + b"".join(b'<image href="' + uri(i) + b'"/>' for i in images) + b"</svg>")
+
+
+def test_base64_svg_scanned_for_embedded_images(censor):
+    a, b = png(6), png(7)
+    body = b'.ad{background:url("' + uri(svg_with(a, b), "svg+xml") + b'")}'
+    result = censor_data_uris(body, censor, fail_closed=True)
+    assert result.changed and [m for m, _ in result.results] == ["image/png"] * 2
+    [svg] = payloads(result.body)
+    assert svg.startswith(b"<svg") and payloads(svg) and all(
+        o not in (a, b) for o in payloads(svg))
+
+
+def test_svg_depth_limits_nesting(make_config):
+    fake = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=BOX)])
+    inner = uri(svg_with(png(8)), "svg+xml")
+    body = b'"' + uri(b'<svg><image href="' + inner + b'"/></svg>', "svg+xml") + b'"'
+    base = "images: {size_floor_bytes: 0, min_side_px: 1}\ncache: {max_entries: 0}\n"
+    deep = censor_data_uris(body, Censor(make_config(base), fake), fail_closed=True)
+    assert deep.changed and len(deep.results) == 1
+    shallow = make_config(base + "data_uris: {svg_depth: 1}\n")
+    assert not censor_data_uris(body, Censor(shallow, fake), fail_closed=True).results
+    off = make_config(base + "data_uris: {svg_depth: 0}\n")
+    assert not censor_data_uris(body, Censor(off, fake), fail_closed=True).results
+
+
+def test_clean_svg_untouched(cfg):
+    body = b'"' + uri(svg_with(png(9)), "svg+xml") + b'"'
+    result = censor_data_uris(body, Censor(cfg, FakeDetector()), fail_closed=True)
+    assert not result.changed and result.body is body and len(result.results) == 1
+
+
+def test_content_type_globs(make_config):
+    du = make_config().data_uris
+    assert du.matches("application/ld+json") and du.matches("application/rss+xml")
+    assert du.matches("text/javascript") and du.matches("image/svg+xml")
+    assert not du.matches("application/octet-stream") and not du.matches("video/mp4")

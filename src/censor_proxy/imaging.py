@@ -33,10 +33,33 @@ MIME_FORMATS = {
 }
 
 
+def sniff(data: bytes) -> str | None:
+    """The MIME type of a supported image format, from its leading bytes; for
+    responses whose Content-Type doesn't say."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp":
+        # Major brand, then (after the minor version) compatible brands: AVIF
+        # may be "mif1" major with "avif" compatible.
+        end = min(int.from_bytes(data[:4], "big"), 64)
+        brands = {data[8:12]} | {data[i:i + 4] for i in range(16, end - 3, 4)}
+        if brands & {b"avif", b"avis"}:
+            return "image/avif"
+    return None
+
+
 @dataclass
 class ScanResult:
     data: bytes
-    # clean | censored | fail_closed | skipped | error
+    # clean | censored | fail_closed | skipped | error, or unscanned (a
+    # response requested as an image that never reached the censor; logged
+    # at debug)
     action: str
     reason: str = ""
     format: str | None = None

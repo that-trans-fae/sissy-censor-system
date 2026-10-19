@@ -82,7 +82,13 @@ you change; every option and its default is documented in
 rejected at startup.
 
 The detection log is `logs/detections.jsonl`. At `logging.level: info` it
-records hostnames; `debug` adds full URLs and every image scanned.
+records hostnames; `debug` adds full URLs, every image scanned, and every
+response the browser requested as an image that wasn't scanned (action
+`unscanned`, with the reason). To find what is slipping through:
+
+```bash
+grep '"unscanned"' logs/detections.jsonl
+```
 
 ## Video
 

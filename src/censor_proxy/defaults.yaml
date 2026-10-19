@@ -101,6 +101,21 @@ images:
     - image/heic
     - image/heif
     - image/jp2
+  # Responses whose Content-Type doesn't say image are checked for a
+  # supported image signature (JPEG, PNG, GIF, WebP, AVIF) and censored like
+  # any other image; browsers display such images regardless of the label.
+  # - sniff_image_requests: anything the browser requested as an image
+  #   (Sec-Fetch-Dest: image, i.e. <img> and CSS images), whatever its type.
+  # - sniff_types: these Content-Types on any request ('' is a missing
+  #   header). Only buffered when Content-Length is at most sniff_max_bytes,
+  #   so large downloads and media segments still stream.
+  sniff_image_requests: true
+  sniff_types:
+    - ''
+    - application/octet-stream
+    - binary/octet-stream
+    - application/binary
+  sniff_max_bytes: 16777216
   # Larger images, or ones that would take more than max_decoded_bytes of
   # memory to decode (width x height x 4 x frames), aren't scanned: they are
   # delivered as their first frame, fully censored. Nothing streams through
@@ -119,13 +134,30 @@ data_uris:
   # Scan text bodies for base64 data-URI images (data:image/...;base64,...)
   # and censor them in place, with the same rules as image responses.
   enabled: true
-  # Matched against the response Content-Type, ignoring parameters.
+  # Matched against the response Content-Type, ignoring parameters; globs
+  # allowed. JavaScript is where ad tags usually carry their creatives.
+  # Censoring an image changes the body, so a <script> or stylesheet pinned
+  # with Subresource Integrity stops loading if one of its images is
+  # censored.
   content_types:
     - text/html
+    - application/xhtml+xml
     - text/css
     - application/json
+    - application/*+json
+    - text/javascript
+    - application/javascript
+    - application/x-javascript
+    - text/xml
+    - application/xml
+    - application/*+xml
+    - image/svg+xml
+    - text/plain
   # Larger text bodies are streamed through unscanned.
   max_body_bytes: 10485760
+  # Base64 SVG data URIs are decoded and scanned for data-URI images inside
+  # them, up to this many SVGs deep. 0 leaves SVG data URIs alone.
+  svg_depth: 2
 
 video:
   # Inject a control on pages from `hosts` that covers every <video> and
@@ -197,7 +229,9 @@ cache:
   max_entries: 1024
 
 logging:
-  # off | info | debug. info logs hostnames; debug adds full URLs.
+  # off | info | debug. info logs hostnames; debug adds full URLs, every
+  # image scanned, and every response requested as an image that wasn't
+  # scanned (action "unscanned", with the reason).
   level: info
   # JSONL detection log. Rotated at max_bytes, keeping `backups` old files.
   path: /logs/detections.jsonl

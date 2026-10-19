@@ -1,6 +1,7 @@
-"""mitmproxy addon: censor female explicit regions in image responses and in
-base64 data-URI images embedded in text bodies, and inject the video control
-into pages on allowlisted hosts.
+"""mitmproxy addon: censor female explicit regions in image responses
+(including ones whose Content-Type doesn't say image) and in base64 data-URI
+images embedded in text bodies, and inject the video control into pages on
+allowlisted hosts.
 
 Run with:  mitmdump -s censor.py
 """
@@ -17,7 +18,7 @@ from mitmproxy import ctx, http
 from censor_proxy import datauri, inject
 from censor_proxy.config import Config, load_config
 from censor_proxy.detection_log import DetectionLog
-from censor_proxy.imaging import Censor, ScanResult
+from censor_proxy.imaging import Censor, ScanResult, sniff
 from censor_proxy.server import InternalServer
 from censor_proxy.video import VideoJobs
 
@@ -94,23 +95,56 @@ class CensorAddon:
         elif _is_image(flow):
             # Always buffered: oversized images fail closed in censor_bytes.
             flow.response.stream = False
+        elif self._is_sniff_candidate(flow):
+            flow.metadata["censor_sniff"] = True
+            flow.response.stream = False
         elif self._is_data_uri_text(flow) or self._is_video_page(flow):
             length = flow.response.headers.get("Content-Length", "")
             flow.response.stream = (length.isdigit()
                                     and int(length) > self.cfg.data_uris.max_body_bytes)
         else:
             flow.response.stream = True
+        if flow.response.stream and _requested_as_image(flow):
+            self._log_unscanned(flow, f"streamed (status {flow.response.status_code})")
 
     async def response(self, flow: http.HTTPFlow) -> None:
         if self.censor is None or flow.response is None or flow.response.stream:
             return
         if _is_image(flow):
-            await self._censor_image(flow)
+            await self._censor_image(flow, _mime(flow))
             return
+        if flow.metadata.get("censor_sniff"):
+            if mime := sniff(flow.response.content or b""):
+                await self._censor_image(flow, mime, source="sniffed")
+                return
         if self._is_video_page(flow):
             self._inject(flow)
         if self._is_data_uri_text(flow):
             await self._censor_text(flow)
+        if _requested_as_image(flow) and not flow.metadata.get("censor_logged"):
+            ctype = flow.response.headers.get("Content-Type", "") or "missing"
+            self._log_unscanned(flow, f"no supported image found (Content-Type {ctype})")
+
+    def _is_sniff_candidate(self, flow: http.HTTPFlow) -> bool:
+        """A 200 response that may be an image despite its Content-Type."""
+        icfg = self.cfg.images
+        if flow.response.status_code != 200:
+            return False
+        mime = _mime(flow)
+        if icfg.sniff_image_requests and _requested_as_image(flow) and mime != "image/svg+xml":
+            return True
+        length = flow.response.headers.get("Content-Length", "")
+        return (mime in icfg.sniff_types and length.isdigit()
+                and int(length) <= icfg.sniff_max_bytes)
+
+    def _log_unscanned(self, flow: http.HTTPFlow, reason: str) -> None:
+        self._record(flow, ScanResult(b"", "unscanned", reason), _mime(flow))
+
+    def _record(self, flow: http.HTTPFlow, result: ScanResult, mime: str,
+                source: str = "response") -> None:
+        flow.metadata["censor_logged"] = True
+        self.detections.record(result, flow.request.pretty_host, flow.request.pretty_url, mime,
+                               source=source)
 
     def _is_video_document(self, flow: http.HTTPFlow) -> bool:
         """A video opened directly as a page or iframe."""
@@ -159,11 +193,11 @@ class CensorAddon:
         if body is not None:
             _replace_body(flow, body)
 
-    async def _censor_image(self, flow: http.HTTPFlow) -> None:
+    async def _censor_image(self, flow: http.HTTPFlow, mime: str, source: str = "response") -> None:
         data = flow.response.content
         if not data:
+            self._log_unscanned(flow, "empty body")
             return
-        mime = _mime(flow)
         loop = asyncio.get_running_loop()
         self.in_flight += 1
         try:
@@ -181,15 +215,16 @@ class CensorAddon:
 
         if result.changed:
             _replace_body(flow, result.data)
-        self.detections.record(result, flow.request.pretty_host, flow.request.pretty_url, mime)
+        self._record(flow, result, mime, source)
 
     async def _censor_text(self, flow: http.HTTPFlow) -> None:
         body = flow.response.content
-        matches = datauri.find(body) if body else []
+        loop = asyncio.get_running_loop()
+        # Off the event loop: JavaScript bundles can run to megabytes.
+        matches = await loop.run_in_executor(None, datauri.find, body) if body else []
         if not matches:
             return
         fail_closed = self.cfg.censor.fail_closed
-        loop = asyncio.get_running_loop()
         self.in_flight += 1
         try:
             # Each image gets the per-image budget; one slow image shouldn't
@@ -211,8 +246,7 @@ class CensorAddon:
         if result.changed:
             _replace_body(flow, result.body)
         for mime, r in result.results:
-            self.detections.record(r, flow.request.pretty_host, flow.request.pretty_url, mime,
-                                   source="data-uri")
+            self._record(flow, r, mime, source="data-uri")
 
     async def _run_timed(self, timeout: float, fn, *args):
         """Run fn on the worker pool. The timeout starts when a worker picks
@@ -231,7 +265,7 @@ class CensorAddon:
     def _is_data_uri_text(self, flow: http.HTTPFlow) -> bool:
         return (self.cfg.data_uris.enabled and flow.response is not None
                 and flow.response.status_code == 200
-                and _mime(flow) in self.cfg.data_uris.content_types)
+                and self.cfg.data_uris.matches(_mime(flow)))
 
 
 def strip_accept(accept: str, remove: frozenset[str]) -> str:
@@ -256,6 +290,11 @@ def _replace_body(flow: http.HTTPFlow, data: bytes) -> None:
     # stay so the browser can keep caching the result.
     for header in ("Content-MD5", "Digest", "Repr-Digest", "Content-Digest"):
         flow.response.headers.pop(header, None)
+
+
+def _requested_as_image(flow: http.HTTPFlow) -> bool:
+    # <img>, CSS images and the like; fetch() and XHR say "empty".
+    return flow.request.headers.get("Sec-Fetch-Dest", "") == "image"
 
 
 def _is_image(flow: http.HTTPFlow) -> bool:

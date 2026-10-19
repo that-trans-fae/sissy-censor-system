@@ -4,6 +4,9 @@ A single regex over the raw bytes covers <img src>, srcset, inline styles,
 CSS url() and JSON strings alike, so the body is never parsed. JSON may
 escape "/" as "\\/", both in "data:image\\/png" and inside the payload; that
 is undone for decoding and reapplied when the censored image is written back.
+Parameters before ";base64" (";charset=utf-8") and any letter case are
+accepted. Base64 SVGs are decoded and scanned the same way for images inside
+them, up to data_uris.svg_depth deep.
 """
 
 from __future__ import annotations
@@ -15,7 +18,10 @@ from dataclasses import dataclass, field
 
 from .imaging import Censor, ScanResult
 
-DATA_URI = re.compile(rb"data:image\\?/(png|jpe?g|gif|webp|avif);base64,((?:[A-Za-z0-9+=]|\\?/)+)")
+DATA_URI = re.compile(
+    rb"data:image\\?/(png|jpe?g|gif|webp|avif|svg\+xml)(?:;[^;,\s\"'<>()]*)*?;base64,"
+    rb"((?:[A-Za-z0-9+=]|\\?/)+)", re.IGNORECASE)
+SVG = "image/svg+xml"
 
 
 @dataclass
@@ -30,14 +36,12 @@ class DataUriResult:
 
 
 def find(body: bytes) -> list[re.Match]:
-    if b"data:image" not in body:
-        return []
     return list(DATA_URI.finditer(body))
 
 
 def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
                      matches: list[re.Match] | None = None,
-                     force_reason: str | None = None) -> DataUriResult:
+                     force_reason: str | None = None, _depth: int = 0) -> DataUriResult:
     """Run every data-URI image in `body` through censor_bytes and splice the
     results back in.
 
@@ -57,7 +61,17 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
             data = base64.b64decode(raw + b"=" * (-len(raw) % 4), validate=True)
         except (binascii.Error, ValueError):
             continue
-        mime = "image/" + m.group(1).decode()
+        mime = "image/" + m.group(1).decode().lower()
+        if mime == SVG:
+            if _depth >= censor.cfg.data_uris.svg_depth:
+                continue
+            inner = censor_data_uris(data, censor, fail_closed=fail_closed,
+                                     force_reason=force_reason, _depth=_depth + 1)
+            results += inner.results
+            if inner.changed:
+                out += [body[last:m.start(2)], _encode(inner.body, escaped)]
+                last = m.end(2)
+            continue
         if force_reason:
             result = censor.fail_closed(data, force_reason)
         else:
@@ -69,12 +83,14 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
                           else ScanResult(data, "error", f"{reason}; fail_closed off, delivered unmodified"))
         results.append((mime, result))
         if result.changed:
-            encoded = base64.b64encode(result.data)
-            if escaped:
-                encoded = encoded.replace(b"/", b"\\/")
-            out += [body[last:m.start(2)], encoded]
+            out += [body[last:m.start(2)], _encode(result.data, escaped)]
             last = m.end(2)
     if last == 0:
         return DataUriResult(body, results)
     out.append(body[last:])
     return DataUriResult(b"".join(out), results)
+
+
+def _encode(data: bytes, escaped: bool) -> bytes:
+    encoded = base64.b64encode(data)
+    return encoded.replace(b"/", b"\\/") if escaped else encoded
