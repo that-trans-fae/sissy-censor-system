@@ -64,9 +64,12 @@ Last updated Oct 19, 2026.
 - Installers (`install/`): one-line scripts run from GitHub for Linux,
   macOS and Windows (Docker Desktop, clone, build, system CA trust, system
   proxy, with `SCS_UNINSTALL=1` to reverse) and a dedicated "Sissy Browser"
-  Chromium profile pinned to the proxy with its own icon. Syntax-checked
-  only (bash, shellcheck, PowerShell parser); not yet run end to end on any
-  platform, and the repository URL is still a placeholder
+  Chromium profile pinned to the proxy with its own icon, the admin panel
+  on its bookmark bar and the proxy CA trusted in the profile's own
+  certificate store (no flags, no system trust). The browser installer is
+  verified on Ubuntu with snap Chromium 155; the system-level installers,
+  macOS and Windows are syntax-checked only (bash, shellcheck, PowerShell
+  parser). The repository URL is still a placeholder
 
 ## Not done yet
 
