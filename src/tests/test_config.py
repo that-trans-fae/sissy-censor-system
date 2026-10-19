@@ -143,6 +143,8 @@ def _passed_through(cfg, host):
     "www.crunchyroll.com", "www.disneyplus.com", "ipv4-c001.nflxvideo.net", "play.max.com",
     "tv.apple.com", "pluto.tv", "www.youtube.com", "m.youtube.com", "www.youtube-nocookie.com",
     "youtu.be", "i.ytimg.com", "rr3---sn-a5mekn7s.googlevideo.com",
+    "registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com",
+    "download.docker.com", "desktop.docker.com", "login.docker.com",
 ])
 def test_builtin_whitelist_covers(make_config, host):
     assert _passed_through(make_config(), host)
@@ -157,6 +159,7 @@ def test_builtin_whitelist_covers(make_config, host):
     "gov.uk.example.com", "edu.au.example.net", "mychartxyz.com", "www.ubuntu.com",
     "launchpad.net", "snapcraft.io", "www.amazon.com", "m.media-amazon.com",
     "www.apple.com", "notyoutube.com", "youtube.com.example.net",
+    "notdocker.io", "docker.com.example.net",
 ])
 def test_builtin_whitelist_leaves_image_hosts(make_config, host):
     assert not _passed_through(make_config(), host)

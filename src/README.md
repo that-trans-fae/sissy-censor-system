@@ -93,7 +93,7 @@ Whitelisted hosts bypass TLS interception entirely, so the proxy never sees
 their logins and nothing they serve is censored. The built-in list
 (`whitelist.builtin`, regexes on `host:port`) covers Chromium's updaters and
 operating system updates (Ubuntu, Snap, Flathub, fwupd, Debian, Fedora,
-Windows, Apple), sign-in providers, password managers, payment processors,
+Windows, Apple), Docker (Hub, image pulls, Docker Desktop), sign-in providers, password managers, payment processors,
 banks, brokerages and credit bureaus (US, UK, Australia, Canada), health
 portals (MyChart), insurers, pharmacies and labs, streaming services
 (Netflix, Disney+, Hulu, Max, Prime Video, Paramount+, Peacock, Crunchyroll,
