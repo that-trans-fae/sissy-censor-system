@@ -292,17 +292,29 @@ function Chromium-Version($exe) {
 # (an elevation prompt) to update a Chromium in Program Files. Not winget:
 # its Hibbiki.Chromium manifest shipped as "portable" in Oct 2026, which
 # installs nothing.
+# A web request, retried over transient errors (GitHub answered 500 to a
+# first attempt once, and the retry went through).
+function Invoke-Retrying([scriptblock]$request) {
+    for ($attempt = 1; ; $attempt++) {
+        try { return (& $request) }
+        catch {
+            if ($attempt -ge 4) { throw }
+            Warn "$($_.Exception.Message) (attempt $attempt of 4; retrying in 5 s)"
+            Start-Sleep 5
+        }
+    }
+}
 function Install-ChromiumBuild([bool]$systemLevel) {
     $ProgressPreference = 'SilentlyContinue'   # the progress bar makes Invoke-WebRequest crawl
     $url = $ChromiumLatestUrl; $digest = $null; $tag = ''
     try {
-        $rel = Invoke-RestMethod -Uri $ChromiumReleaseApi -UseBasicParsing
+        $rel = Invoke-Retrying { Invoke-RestMethod -Uri $ChromiumReleaseApi -UseBasicParsing }
         $asset = $rel.assets | Where-Object { $_.name -eq 'mini_installer.exe' } | Select-Object -First 1
         if ($asset) { $url = $asset.browser_download_url; $digest = "$($asset.digest)" -replace '^sha256:', ''; $tag = " $($rel.tag_name)" }
     } catch { Warn "could not read the Chromium release list ($($_.Exception.Message)); the latest build is downloaded unverified" }
     Log "Downloading Chromium$tag (about 130 MB)"
     $exe = Join-Path $env:TEMP 'scs-chromium-mini_installer.exe'
-    Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+    Invoke-Retrying { Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing }
     if ($digest) {
         $have = (Get-FileHash -Algorithm SHA256 $exe).Hash
         if ($have -ne $digest.ToUpper()) { Remove-Item -Force $exe; Die "the Chromium download's SHA-256 ($have) is not the release's ($digest)" }
