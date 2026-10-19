@@ -17,6 +17,32 @@ video or address you visit is sent anywhere for analysis. There is no
 account, no cloud service and no telemetry. The only thing the install ever
 fetches on its own is a newer version of itself from Docker Hub.
 
+> [!TIP]
+> **TL;DR: install in one command**, then open **Sissy Browser** from your
+> app launcher, Start menu or `~/Applications` and browse. It installs
+> Docker if needed and downloads about a gigabyte the first time.
+>
+> **Linux** (Ubuntu, Debian, Fedora or Arch), in a terminal as your normal user:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
+> ```
+>
+> **macOS**, in Terminal:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
+> ```
+>
+> **Windows 10 or 11**, pasted into a normal PowerShell window (not cmd or the Run box):
+>
+> ```powershell
+> irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex
+> ```
+>
+> Details, platform notes and how to uninstall are under
+> [Installing the Sissy Browser](#installing-the-sissy-browser).
+
 **Contents**
 
 - [What it does](#what-it-does)
