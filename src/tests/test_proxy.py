@@ -63,7 +63,9 @@ def proxy(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(f"logging: {{level: debug, path: '{log}'}}\n"
                    f"video: {{cache_dir: '{tmp_path / 'video'}'}}\n"
-                   f"proxy: {{internal_port: {free_port()}}}\n")
+                   f"proxy: {{internal_port: {free_port()}}}\n"
+                   f"admin: {{bind: 127.0.0.1, port: {free_port()}}}\n"
+                   "whitelist: {domains: [youtube.com]}\n")
     port = free_port()
     proc = subprocess.Popen(
         ["mitmdump", "-s", str(SRC / "censor.py"), "--listen-host", "127.0.0.1",
@@ -170,3 +172,26 @@ def test_strip_accept():
         "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
     assert strip_accept("image/jxl", frozenset({"image/jxl"})) == "*/*"
     assert strip_accept("text/html", frozenset({"image/jxl"})) == "text/html"
+
+
+def test_whitelisted_pages_pass_unscanned(site, proxy):
+    root, base = site
+    opener, log = proxy
+    # Requested by a whitelisted page: delivered as is, logged as unscanned.
+    req = urllib.request.Request(base + "/image.bin", headers={
+        "Sec-Fetch-Dest": "image", "Referer": "https://www.youtube.com/watch?v=x"})
+    assert opener.open(req, timeout=30).read() == (root / "image.bin").read_bytes()
+    req = urllib.request.Request(base + "/page.html", headers={
+        "Sec-Fetch-Dest": "document", "Referer": "https://m.youtube.com/"})
+    assert b"inject.js" not in opener.open(req, timeout=30).read()
+    found = {e["url"].rsplit("/", 1)[1]: e for e in entries(log)}
+    assert found["image.bin"]["action"] == "unscanned"
+    assert found["image.bin"]["reason"] == "whitelisted (youtube.com)"
+
+
+def test_admin_host_routed_to_panel(proxy):
+    opener, _ = proxy
+    with opener.open("http://scs.local/admin/api/session", timeout=30) as r:
+        assert json.loads(r.read()) == {"pin_set": False, "unlocked": True, "retry_after": 0}
+    with opener.open("http://scs.local/admin/", timeout=30) as r:
+        assert b"admin.js" in r.read()

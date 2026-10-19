@@ -1,7 +1,8 @@
 """mitmproxy addon: censor female explicit regions in image responses
 (including ones whose Content-Type doesn't say image) and in base64 data-URI
 images embedded in text bodies, and inject the video control into pages on
-allowlisted hosts.
+allowlisted hosts. Whitelisted domains pass untouched; the admin panel
+(censor_proxy/admin.py) can change the config while the proxy runs.
 
 Run with:  mitmdump -s censor.py
 """
@@ -11,12 +12,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit
 
 from mitmproxy import ctx, http
 
 from censor_proxy import datauri, inject
-from censor_proxy.config import Config, load_config
+from censor_proxy.admin import AdminServer, UserConfigFile
+from censor_proxy.config import Config, config_path, load_config
 from censor_proxy.detection_log import DetectionLog
 from censor_proxy.imaging import Censor, ScanResult, sniff
 from censor_proxy.server import InternalServer
@@ -33,10 +38,17 @@ class CensorAddon:
         self.pool: ThreadPoolExecutor | None = None
         self.jobs: VideoJobs | None = None
         self.server: InternalServer | None = None
+        self.admin: AdminServer | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
         self.video_hosts: list[re.Pattern] = []
         self.in_flight = 0
+        self.started = time.time()
+        # Every key present from the start: the admin thread copies this.
+        self.stats = Counter(dict.fromkeys(
+            ("censored", "clean", "skipped", "fail_closed", "error", "unscanned", "whitelisted"), 0))
 
     def running(self):
+        self.loop = asyncio.get_running_loop()
         self.cfg = load_config()
         self.censor = Censor(self.cfg)
         self.detections = DetectionLog(self.cfg)
@@ -51,6 +63,9 @@ class CensorAddon:
         ctx.options.update(connection_strategy="lazy")
         if self.cfg.proxy.passthrough_hosts:
             ctx.options.update(ignore_hosts=list(self.cfg.proxy.passthrough_hosts))
+        if self.cfg.admin.enabled:
+            self.admin = AdminServer(self.cfg, self, UserConfigFile(config_path()))
+            self.admin.start()
         log.info("censor proxy ready: model=%s style=%s", self.cfg.model.path or "320n (bundled)",
                  self.cfg.censor.style)
 
@@ -59,20 +74,106 @@ class CensorAddon:
             self.pool.shutdown(wait=False, cancel_futures=True)
         if self.server:
             self.server.stop()
+        if self.admin:
+            self.admin.stop()
 
     def _health(self) -> dict:
         return {"ready": self.censor is not None, "in_flight": self.in_flight,
                 "video_jobs": self.jobs.active() if self.jobs else 0}
 
+    # -- admin panel ------------------------------------------------------
+
+    def status(self) -> dict:
+        cfg = self.cfg
+        return {
+            "ready": self.censor is not None,
+            "uptime_seconds": round(time.time() - self.started),
+            "in_flight": self.in_flight,
+            "counts": dict(self.stats),
+            "model": cfg.model.path or "320n (bundled)",
+            "resolution": cfg.model.resolution,
+            "tiling": cfg.model.tiling,
+            "cache_entries": self.censor.cached() if self.censor else 0,
+            "censor_style": cfg.censor.style,
+            "fail_closed": cfg.censor.fail_closed,
+            "video": {"enabled": cfg.video.enabled,
+                      "model": cfg.video.model_path or "320n (bundled)",
+                      "active_jobs": self.jobs.active() if self.jobs else 0},
+            "log_level": cfg.logging.level,
+            "log_path": cfg.logging.path,
+            "whitelist": list(cfg.whitelist.domains),
+            "brand_name": cfg.video.brand_name,
+            "health_host": cfg.proxy.health_host,
+            "admin_host": cfg.proxy.admin_host,
+        }
+
+    def apply_config(self, cfg: Config) -> None:
+        """Switch to a new config while running. Called from the admin
+        server's thread: anything slow (loading a model) happens here, and
+        the switch itself on the event loop, between requests."""
+        old = self.cfg
+        censor = self.censor
+        if (cfg.model, cfg.detection, cfg.censor, cfg.images, cfg.cache) != \
+                (old.model, old.detection, old.censor, old.images, old.cache):
+            # Cached results depend on the thresholds, so a fresh cache.
+            censor = Censor(cfg, self.censor.detector if cfg.model == old.model else None)
+        pool = None
+        if cfg.model.workers != old.model.workers:
+            pool = ThreadPoolExecutor(max_workers=cfg.model.workers, thread_name_prefix="censor")
+
+        async def switch():
+            if pool:
+                self.pool, previous = pool, self.pool
+                previous.shutdown(wait=False)  # queued scans still finish
+            self.cfg, self.censor = cfg, censor
+            self.detections = DetectionLog(cfg)
+            self.video_hosts = [re.compile(p) for p in cfg.video.hosts]
+            self.jobs.reconfigure(cfg)
+            self.server.reconfigure(cfg)
+            if cfg.proxy.passthrough_hosts != old.proxy.passthrough_hosts:
+                ctx.options.update(ignore_hosts=list(cfg.proxy.passthrough_hosts))
+        asyncio.run_coroutine_threadsafe(switch(), self.loop).result(timeout=30)
+        log.info("config applied: model=%s style=%s whitelist=%s", cfg.model.path or "320n (bundled)",
+                 cfg.censor.style, ", ".join(cfg.whitelist.domains) or "none")
+
+    def _whitelisted(self, flow: http.HTTPFlow) -> str | None:
+        """The whitelisted domain covering this request or the page that made it."""
+        wl = self.cfg.whitelist
+        if not wl.domains:
+            return None
+        if domain := wl.match(flow.request.pretty_host):
+            return domain
+        if wl.match_referer:
+            for header in ("Referer", "Origin"):
+                if (value := flow.request.headers.get(header)) and \
+                        (domain := wl.match(urlsplit(value).hostname or "")):
+                    return domain
+        return None
+
+    # -- hooks ------------------------------------------------------------
+
     def request(self, flow: http.HTTPFlow) -> None:
         if self.cfg is None:
             return
+        host = flow.request.pretty_host
         # The proxy's own host is served by the internal server.
-        if flow.request.pretty_host == self.cfg.proxy.health_host:
+        if host == self.cfg.proxy.health_host:
             flow.metadata["censor_internal"] = True
             flow.request.scheme = "http"
             flow.request.host = "127.0.0.1"
             flow.request.port = self.cfg.proxy.internal_port
+            return
+        # The admin host goes to the admin listener, keeping its Host so the
+        # panel knows its origin (https://scs.local).
+        if host == self.cfg.proxy.admin_host and self.admin:
+            flow.metadata["censor_internal"] = True
+            flow.request.scheme = "http"
+            flow.request.host = "127.0.0.1"
+            flow.request.port = self.admin.port
+            flow.request.host_header = host
+            return
+        if domain := self._whitelisted(flow):
+            flow.metadata["censor_whitelisted"] = domain
             return
         accept = flow.request.headers.get("Accept")
         if accept and self.cfg.images.strip_accept:
@@ -90,6 +191,12 @@ class CensorAddon:
             return
         if flow.metadata.get("censor_internal"):
             flow.response.stream = True  # video streams must not be buffered
+        elif domain := flow.metadata.get("censor_whitelisted"):
+            flow.response.stream = True
+            self.stats["whitelisted"] += 1
+            if _requested_as_image(flow):
+                self._log_unscanned(flow, f"whitelisted ({domain})", count=False)
+            return
         elif self._is_video_document(flow):
             self._replace_with_video_page(flow)
         elif _is_image(flow):
@@ -137,12 +244,14 @@ class CensorAddon:
         return (mime in icfg.sniff_types and length.isdigit()
                 and int(length) <= icfg.sniff_max_bytes)
 
-    def _log_unscanned(self, flow: http.HTTPFlow, reason: str) -> None:
-        self._record(flow, ScanResult(b"", "unscanned", reason), _mime(flow))
+    def _log_unscanned(self, flow: http.HTTPFlow, reason: str, count: bool = True) -> None:
+        self._record(flow, ScanResult(b"", "unscanned", reason), _mime(flow), count=count)
 
     def _record(self, flow: http.HTTPFlow, result: ScanResult, mime: str,
-                source: str = "response") -> None:
+                source: str = "response", count: bool = True) -> None:
         flow.metadata["censor_logged"] = True
+        if count:
+            self.stats[result.action] += 1
         self.detections.record(result, flow.request.pretty_host, flow.request.pretty_url, mime,
                                source=source)
 

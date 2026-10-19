@@ -76,8 +76,9 @@ Still to do.
 
 ## Configure
 
-Edit `config/config.yaml` and restart the container. It only needs the keys
-you change; every option and its default is documented in
+Use the [admin panel](#admin-panel), or edit `config/config.yaml` and restart
+the container (or press "Reload from file" in the panel). It only needs the
+keys you change; every option and its default is documented in
 [`censor_proxy/defaults.yaml`](censor_proxy/defaults.yaml). Unknown keys are
 rejected at startup.
 
@@ -98,6 +99,40 @@ video, blur it with ffmpeg and stream the censored copy back; playback
 starts after a few seconds of video are ready. Videos the control can't find
 a source for stay covered. The control's text and colours are at the top of
 `censor_proxy/static/inject.js`; its name is `video.brand_name`.
+
+## Admin panel
+
+Open either:
+
+- <http://localhost:8082/admin>: direct, published on the host's loopback only
+- <https://scs.local/admin>: through the proxy (`proxy.admin_host`)
+
+Tabs:
+
+- **Overview**: counts since start (censored, clean, whitelisted, failed
+  closed...), the model and the log level.
+- **Whitelist**: domains that pass through unscanned and unmodified,
+  subdomains included. Pages from them also get no video control. By default
+  what a whitelisted page loads passes too (matched by `Referer`), so
+  YouTube's thumbnails from `i.ytimg.com` aren't scanned. Turn that off with
+  the checkbox (`whitelist.match_referer`). `youtube.com` is in the example
+  config.
+- **Detections**: the latest entries of the detection log, filterable. No
+  images, just hosts, labels and scores.
+- **Video**: video jobs with their progress, and a button to cancel them.
+- **Settings**: every option in `defaults.yaml` with its comment. Saving
+  writes `config/config.yaml`, keeping its comments, and applies the change
+  at once. Options marked "restart" (ports, the video cache and slots) take
+  effect after `docker compose restart`.
+- **PIN lock**: an optional 4-12 digit PIN, stored hashed as
+  `admin.pin_hash`. Five wrong PINs in a row lock attempts out for five
+  minutes, and an unlocked panel locks again after 15 idle minutes. Forgot it?
+  Delete `admin.pin_hash` from `config/config.yaml` and restart.
+
+Any page you visit can send requests to both addresses, so the panel refuses
+other `Host` names (DNS rebinding) and any write that isn't JSON from its own
+origin, and sends no CORS headers. `config/` is mounted writable in
+`compose.yaml` so the panel can save.
 
 ## Review detections
 

@@ -146,6 +146,21 @@ class VideoJobs:
         with self._lock:
             return self._jobs.get(id_)
 
+    def list(self) -> list[Job]:
+        """Every job this run has seen, newest first."""
+        with self._lock:
+            return sorted(self._jobs.values(), key=lambda j: j.created, reverse=True)
+
+    def reconfigure(self, cfg: Config) -> None:
+        """Use a new config for later jobs. The cache directory and the number
+        of slots are fixed at startup."""
+        with self._detector_lock:
+            old, new = self.cfg, cfg
+            if (old.model, old.video.model_path, old.video.model_resolution, old.video.tiling) != \
+                    (new.model, new.video.model_path, new.video.model_resolution, new.video.tiling):
+                self._detector = None
+            self.cfg = cfg
+
     def active(self) -> int:
         with self._lock:
             return sum(j.state in ("queued", "running") for j in self._jobs.values())

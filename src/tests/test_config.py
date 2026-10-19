@@ -42,3 +42,24 @@ def test_label_threshold_override(make_config):
 def test_data_uri_content_types_normalised(make_config):
     cfg = make_config("data_uris: {content_types: [Text/HTML]}\n")
     assert cfg.data_uris.content_types == {"text/html"}
+
+
+def test_whitelist_matches_domain_and_subdomains(make_config):
+    cfg = make_config("whitelist: {domains: [www.YouTube.com, '*.example.org.', 'https://ytimg.com/x']}\n")
+    wl = cfg.whitelist
+    assert wl.domains == ("youtube.com", "example.org", "ytimg.com")
+    assert wl.match("youtube.com") == "youtube.com"
+    assert wl.match("WWW.youtube.com.") == "youtube.com"
+    assert wl.match("i.ytimg.com") == "ytimg.com"
+    assert wl.match("notyoutube.com") is None
+    assert wl.match("youtube.com.evil.net") is None
+
+
+@pytest.mark.parametrize("text", [
+    "whitelist: {domains: ['not a domain']}\n",
+    "admin: {port: 8081}\n",  # same as proxy.internal_port
+    "admin: {nonsense: 1}\n",
+])
+def test_bad_admin_config_rejected(make_config, text):
+    with pytest.raises(ConfigError):
+        make_config(text)

@@ -24,7 +24,9 @@ src/censor_proxy/datauri.py    base64 data-URI images in HTML/CSS/JSON bodies
 src/censor_proxy/video.py      video jobs: ffmpeg decode -> detect -> blur -> fMP4
 src/censor_proxy/server.py     internal HTTP server behind https://censor.local
 src/censor_proxy/inject.py     HTML script injection and CSP extension
+src/censor_proxy/admin.py      admin panel server (localhost:8082, scs.local): PIN, config edits
 src/censor_proxy/static/inject.js  the injected video control (branding at the top)
+src/censor_proxy/static/admin.*    the admin panel page
 src/censor_proxy/config.py     dataclasses + loader (defaults.yaml merged with user file)
 src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
@@ -93,6 +95,18 @@ ffmpeg in `video.py` and stream fragmented MP4 back while they run. Job
 requests are only accepted from origins matching `video.hosts`, and only
 for public addresses (`video.allow_private_sources` relaxes that). See
 `docs/video-design.md`.
+
+## Admin panel
+
+`admin.py` runs its own listener on `admin.port` (8082). Compose publishes
+it on `127.0.0.1`, and the addon routes `proxy.admin_host` (`scs.local`)
+there, keeping the `Host` header. The panel writes `config.yaml` through
+ruamel.yaml, keeping comments, then calls the addon's `apply_config()`, which
+swaps the config on the event loop. A new config key gets a form field
+automatically (typed from its default, with help text from the comment above
+it in `defaults.yaml`). If the key is only read at startup, add it to
+`RESTART_KEYS`. Whitelisted flows (`whitelist.domains`, matched on host or
+Referer) are tagged in `request()` and streamed untouched.
 
 ## Working conventions
 

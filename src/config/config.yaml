@@ -19,3 +19,9 @@ proxy:
 video:
   # Temporarily on while debugging video pages; logs page URLs.
   debug: true
+
+whitelist:
+  # Passed through unscanned, with their subdomains. Managed from the admin
+  # panel's Whitelist tab.
+  domains:
+    - youtube.com

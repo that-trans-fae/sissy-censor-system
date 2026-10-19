@@ -6,8 +6,12 @@ services:
     ports:
       # Loopback only: never expose an intercepting proxy to the LAN.
       - "127.0.0.1:8080:8080"
+      # Admin panel: http://localhost:8082/admin (also https://scs.local/admin
+      # through the proxy).
+      - "127.0.0.1:8082:8082"
     volumes:
       # Keeps the CA stable across rebuilds, so trust is installed once.
       - ./mitmproxy:/root/.mitmproxy
-      - ./config:/config:ro
+      # Writable: the admin panel saves settings to config/config.yaml.
+      - ./config:/config
       - ./logs:/logs

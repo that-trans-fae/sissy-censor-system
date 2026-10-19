@@ -97,6 +97,10 @@ class Censor:
 
     # -- public -----------------------------------------------------------
 
+    def cached(self) -> int:
+        with self._cache_lock:
+            return len(self._cache)
+
     def censor_bytes(self, data: bytes, mime: str | None = None) -> ScanResult:
         """Censor female explicit regions in an encoded image.
 

@@ -29,6 +29,12 @@ Last updated Oct 18, 2026.
   positives preferred to misses)
 - Branding: mark, palette and README banners in `docs/brand/`; the video
   overlay restyled to match (checked in a browser on a static test page)
+- Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
+  status, detection log, video jobs, domain whitelist (`youtube.com` in the
+  example config), every setting editable and applied live, optional PIN
+  lock. Checked in a browser against a test container (whitelist, settings,
+  PIN, phone layout). `https://scs.local` was only tested with curl through
+  the proxy
 
 ## Not done yet
 

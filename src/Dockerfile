@@ -36,7 +36,7 @@ PY
 COPY censor_proxy/ censor_proxy/
 COPY censor.py .
 
-EXPOSE 8080
+EXPOSE 8080 8082
 ENV CENSOR_CONFIG=/config/config.yaml
 
 # No stream_large_bodies: mitmproxy applies it after the addon's

@@ -5,3 +5,5 @@ opencv-python-headless==5.0.0.93
 pillow==13.0.0
 numpy==2.5.4
 pyyaml==6.0.3
+# Comment-preserving edits of config.yaml from the admin panel (also a mitmproxy dependency).
+ruamel.yaml==0.19.1

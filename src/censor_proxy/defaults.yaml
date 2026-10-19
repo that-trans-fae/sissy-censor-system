@@ -222,7 +222,51 @@ proxy:
   # Hostname the proxy answers on itself (/health, /inject.js, /video/...).
   # Requests to it are routed to an internal server on internal_port.
   health_host: censor.local
+  # Hostname the admin panel answers on through the proxy
+  # (https://scs.local/admin). Requests to it go to the admin listener.
+  admin_host: scs.local
   internal_port: 8081
+
+whitelist:
+  # Domains whose content passes through unscanned and unmodified: no image
+  # or data-URI censoring and no video control. An entry covers the domain
+  # and its subdomains (youtube.com also covers www.youtube.com; a leading
+  # www. is dropped). Edited from the admin panel's Whitelist tab.
+  domains: []
+  # Also pass requests made by a whitelisted page (matched by Referer or
+  # Origin), so images a site loads from its own CDN pass too: youtube.com
+  # loads thumbnails from i.ytimg.com. That includes any third-party images
+  # or ads the page embeds. false: only the request's own host counts.
+  match_referer: true
+
+admin:
+  # Admin panel: status, detection log, video jobs, whitelist and settings.
+  # Served at https://<proxy.admin_host>/admin through the proxy, and at
+  # http://localhost:<port>/admin directly. Changing enabled, bind or port
+  # needs a restart.
+  enabled: true
+  # The listener inside the container. 0.0.0.0 so Docker can publish the
+  # port; compose maps it to the host's loopback only.
+  bind: 0.0.0.0
+  port: 8082
+  # Host names accepted by the listener besides proxy.admin_host (any port).
+  # Other names are refused, so a DNS-rebinding page can't reach the panel.
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+    - '[::1]'
+  # PIN lock, set from the panel and stored hashed. null: no lock. To reset
+  # a forgotten PIN, delete this key from config.yaml and restart.
+  pin_hash: null
+  # Wrong PINs allowed in a row before the panel refuses attempts for
+  # pin_lockout_seconds.
+  pin_max_attempts: 5
+  pin_lockout_seconds: 300
+  # An unlocked panel locks again after this long without use (the panel's
+  # own auto-refresh doesn't count as use).
+  session_seconds: 900
+  # Most recent detection log entries the panel loads.
+  log_entries: 500
 
 cache:
   # Content-hash cache of scan results. 0 disables it.

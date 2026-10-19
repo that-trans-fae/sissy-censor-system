@@ -48,6 +48,11 @@ class InternalServer:
     def start(self) -> None:
         self.thread.start()
 
+    def reconfigure(self, cfg: Config) -> None:
+        """Use a new config; the port is fixed at startup."""
+        self.video_hosts = [re.compile(p) for p in cfg.video.hosts]
+        self.cfg = cfg
+
     def stop(self) -> None:
         self.httpd.shutdown()
         self.httpd.server_close()

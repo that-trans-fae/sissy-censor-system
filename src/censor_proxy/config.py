@@ -16,6 +16,8 @@ CONFIG_ENV = "CENSOR_CONFIG"
 
 CENSOR_STYLES = ("gaussian", "pixelate", "solid")
 LOG_LEVELS = ("off", "info", "debug")
+DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)*"
+                    r"[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$")
 
 
 class ConfigError(ValueError):
@@ -122,7 +124,35 @@ class VideoConfig:
 class ProxyConfig:
     passthrough_hosts: tuple[str, ...]
     health_host: str
+    admin_host: str
     internal_port: int
+
+
+@dataclass(frozen=True)
+class WhitelistConfig:
+    domains: tuple[str, ...]
+    match_referer: bool
+
+    def match(self, host: str) -> str | None:
+        """The whitelisted domain covering `host` (itself or a parent), if any."""
+        host = host.lower().rstrip(".")
+        for domain in self.domains:
+            if host == domain or host.endswith("." + domain):
+                return domain
+        return None
+
+
+@dataclass(frozen=True)
+class AdminConfig:
+    enabled: bool
+    bind: str
+    port: int
+    allowed_hosts: frozenset[str]
+    pin_hash: str | None
+    pin_max_attempts: int
+    pin_lockout_seconds: float
+    session_seconds: float
+    log_entries: int
 
 
 @dataclass(frozen=True)
@@ -147,8 +177,22 @@ class Config:
     data_uris: DataUrisConfig
     video: VideoConfig
     proxy: ProxyConfig
+    whitelist: WhitelistConfig
+    admin: AdminConfig
     cache: CacheConfig
     logging: LoggingConfig
+
+
+def normalize_domain(value: str) -> str:
+    """youtube.com from youtube.com, *.YouTube.com., www.youtube.com, or a URL.
+    A leading www. is dropped so the entry covers the whole site."""
+    value = str(value).strip().lower()
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    value = value.split("/", 1)[0].split("?", 1)[0].rsplit("@", 1)[-1]
+    if not value.startswith("["):
+        value = value.split(":", 1)[0]
+    return value.removeprefix("*.").strip(".").removeprefix("www.")
 
 
 def _merge(defaults: dict, override: dict) -> dict:
@@ -202,8 +246,19 @@ def _build(raw: dict[str, Any]) -> Config:
         "proxy": ProxyConfig(
             passthrough_hosts=tuple(raw["proxy"]["passthrough_hosts"] or ()),
             health_host=raw["proxy"]["health_host"],
+            admin_host=str(raw["proxy"]["admin_host"]).lower(),
             internal_port=int(raw["proxy"]["internal_port"]),
         ),
+        "whitelist": WhitelistConfig(
+            domains=tuple(dict.fromkeys(normalize_domain(d)
+                                        for d in raw["whitelist"]["domains"] or ())),
+            match_referer=bool(raw["whitelist"]["match_referer"]),
+        ),
+        "admin": AdminConfig(**{
+            **raw["admin"],
+            "allowed_hosts": frozenset(str(h).lower() for h in raw["admin"]["allowed_hosts"] or ()),
+            "pin_hash": raw["admin"]["pin_hash"] or None,
+        }),
         "cache": CacheConfig(**raw["cache"]),
         "logging": LoggingConfig(**raw["logging"]),
     }
@@ -236,16 +291,45 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("video.sample_fps must be > 0")
     if cfg.video.abandon_seconds <= 0 or cfg.video.idle_seconds <= 0:
         raise ConfigError("video.abandon_seconds and video.idle_seconds must be > 0")
+    for domain in cfg.whitelist.domains:
+        if not DOMAIN.match(domain):
+            raise ConfigError(f"whitelist.domains: not a domain: {domain!r}")
+    if not 0 < cfg.admin.port < 65536:
+        raise ConfigError("admin.port must be between 1 and 65535")
+    if cfg.admin.port == cfg.proxy.internal_port:
+        raise ConfigError("admin.port and proxy.internal_port must differ")
+    if cfg.admin.pin_max_attempts < 1 or cfg.admin.session_seconds <= 0:
+        raise ConfigError("admin.pin_max_attempts must be >= 1 and admin.session_seconds > 0")
+
+
+def defaults() -> dict:
+    return yaml.safe_load(DEFAULTS_PATH.read_text())
+
+
+def merged(override: dict) -> dict:
+    """The effective raw config: defaults with a user override merged in."""
+    return _merge(defaults(), override)
+
+
+def from_override(override: dict) -> Config:
+    return _build(merged(override))
+
+
+def config_path(path: str | os.PathLike | None = None) -> Path | None:
+    """The user config file: `path`, else $CENSOR_CONFIG. None if neither is set."""
+    path = path if path is not None else os.environ.get(CONFIG_ENV)
+    return Path(path) if path else None
+
+
+def read_override(path: Path | None) -> dict:
+    if not path or not path.is_file():
+        return {}
+    override = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(override, dict):
+        raise ConfigError(f"{path}: top level must be a mapping")
+    return override
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
     """Load defaults, then merge the user file at `path` (or $CENSOR_CONFIG) if it exists."""
-    raw = yaml.safe_load(DEFAULTS_PATH.read_text())
-    if path is None:
-        path = os.environ.get(CONFIG_ENV)
-    if path and Path(path).is_file():
-        override = yaml.safe_load(Path(path).read_text()) or {}
-        if not isinstance(override, dict):
-            raise ConfigError(f"{path}: top level must be a mapping")
-        raw = _merge(raw, override)
-    return _build(raw)
+    return from_override(read_override(config_path(path)))
