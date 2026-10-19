@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Sissy Browser">
+  <!-- Sissy Browser: the mark on a plum ink tile with a soft petal glow. -->
+  <defs>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FF6FAE" stop-opacity="0.32"/>
+      <stop offset="0.55" stop-color="#FF6FAE" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#FF6FAE" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#16121A"/>
+  <circle cx="128" cy="128" r="118" fill="url(#glow)"/>
+  <g transform="translate(58 58) scale(3.0435)" fill="#FF6FAE">
+    <rect x="0" y="0" width="14" height="14" rx="3" opacity="0.25"/>
+    <rect x="16" y="0" width="14" height="14" rx="3" opacity="0.6"/>
+    <rect x="32" y="0" width="14" height="14" rx="3" opacity="0.25"/>
+    <rect x="0" y="16" width="14" height="14" rx="3" opacity="0.6"/>
+    <rect x="16" y="16" width="14" height="14" rx="3" opacity="1"/>
+    <rect x="32" y="16" width="14" height="14" rx="3" opacity="0.6"/>
+    <rect x="0" y="32" width="14" height="14" rx="3" opacity="0.25"/>
+    <rect x="16" y="32" width="14" height="14" rx="3" opacity="0.6"/>
+    <rect x="32" y="32" width="14" height="14" rx="3" opacity="0.25"/>
+  </g>
+</svg>

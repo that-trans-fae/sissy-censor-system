@@ -10,6 +10,10 @@ the name shown on it comes from `video.brand_name`.
 - `mark-deep.svg`: the mark in petal deep, for light grounds
 - `banner-dark.svg`, `banner-light.svg`: README banners (1280x320), switched
   by `prefers-color-scheme`
+- `browser-icon.svg`: the "Sissy Browser" app icon (256x256): the mark on a
+  plum ink tile with a soft petal glow. `install/browser.sh` uses it as is
+  on Linux and rasterises it for macOS; `install/browser.ps1` redraws it
+  with GDI+ for the Windows `.ico`, so keep the two in step
 
 ## Mark
 

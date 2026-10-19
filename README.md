@@ -32,7 +32,9 @@ other behaviour are configurable.
 
 ## Quick start
 
-From `src/`:
+One-line installers for Linux, macOS and Windows, plus a dedicated
+"Sissy Browser" that uses the proxy without touching system settings, are
+in [`install/`](install/README.md). By hand, from `src/`:
 
 ```bash
 docker compose up -d --build
