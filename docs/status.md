@@ -56,6 +56,11 @@ Last updated Oct 19, 2026.
   Checked headlessly through the proxy (card topmost over the whole player,
   srcdoc ad paused, four manifests listed) and confirmed playing in the
   browser
+- Pornhub prerolls (Oct 19, 2026): media files named in VAST ads the
+  page fetches (XML `<MediaFile>` or JSON `mediaFiles`) are never taken as
+  a video's source, so the page's own manifest is used instead of the ad.
+  Scanning checked against the real ad response, and confirmed playing
+  the video in the browser
 - Injection only before the page's first `<body>`/`<script>`, no body
   opt-out marker, the admin panel's Video tab explains the injection
   trade-off, and the compose service runs read-only with no capabilities

@@ -192,21 +192,42 @@
   // Some players get their manifests from an API rather than the page
   // (Redtube's /media/hls?s=... answers with a JSON list of master.m3u8
   // URLs, one per quality) and fetch the one they want only once playback
-  // starts, which never happens. JSON responses are read for manifest URLs.
+  // starts, which never happens. JSON and XML responses are read for
+  // manifest URLs.
   const listed = new Set();         // manifest URLs named in JSON the page fetched
   const JSON_MAX = 2 << 20;         // skip larger bodies
+  // Players fetch their preroll ads as VAST: XML with <MediaFile> elements,
+  // or the same shape in JSON (Pornhub's /_xa/ads?...&preroll_type=json
+  // answers with ad.mediaFiles[].uri, on ad CDNs no pattern would name).
+  // Those files are ads wherever they play, so never a video's source.
+  const adFiles = new Set();
+  function adUrl(value) {
+    value = typeof value === "string" && value.trim();
+    const u = /^https?:\/\//i.test(value) && httpUrl(value);  // not types like "video/mp4"
+    if (u) adFiles.add(u);
+  }
+  function jsonAds(value, inAd) {
+    if (typeof value === "string") { if (inAd) adUrl(value); return; }
+    if (!value || typeof value !== "object") return;
+    for (const [k, v] of Object.entries(value)) jsonAds(v, inAd || /^media_?files?$/i.test(k));
+  }
+  const VAST_MEDIA = /<MediaFile\b[^>]*>\s*(?:<!\[CDATA\[)?([^<\]]+)/gi;
   function scanText(text) {
     if (typeof text !== "string" || text.length > JSON_MAX) return;
     for (const u of inlineManifests(text)) listed.add(u);
+    for (const m of text.matchAll(VAST_MEDIA)) adUrl(m[1]);
+    if (/media_?file/i.test(text)) {
+      try { jsonAds(JSON.parse(text), false); } catch (_) { /* not JSON */ }
+    }
   }
-  const isJson = (type) => /\bjson\b/i.test(type || "");
+  const scannable = (type) => /\b(?:json|xml)\b/i.test(type || "");
   const origFetch = window.fetch;
   if (VIDEO && origFetch) {
     window.fetch = function (input, init) {
       note(typeof input === "string" ? input : input && input.url);
       const p = origFetch.apply(this, arguments);
       p.then((res) => {
-        if (isJson(res.headers.get("Content-Type")) &&
+        if (scannable(res.headers.get("Content-Type")) &&
             !(Number(res.headers.get("Content-Length")) > JSON_MAX)) {
           res.clone().text().then(scanText, () => {});
         }
@@ -218,9 +239,12 @@
   const xhrs = new WeakSet();
   function xhrLoaded() {
     try {
-      if (!isJson(this.getResponseHeader("Content-Type"))) return;
+      if (!scannable(this.getResponseHeader("Content-Type"))) return;
       if (this.responseType === "" || this.responseType === "text") scanText(this.responseText);
       else if (this.responseType === "json" && this.response) scanText(JSON.stringify(this.response));
+      else if (this.responseType === "document" && this.responseXML) {
+        for (const m of this.responseXML.getElementsByTagName("MediaFile")) adUrl(m.textContent);
+      }
     } catch (_) { /* not readable */ }
   }
   if (VIDEO) {
@@ -854,8 +878,9 @@
     return bestRendition(found);
   }
 
-  // An ad playing in the page's own player isn't the video (video.ad_sources).
-  const notAd = (u) => u && !AD_SOURCES.some((re) => re.test(u)) ? u : null;
+  // An ad playing in the page's own player isn't the video (video.ad_sources,
+  // and media files named in VAST ads the page fetched).
+  const notAd = (u) => u && !adFiles.has(u) && !AD_SOURCES.some((re) => re.test(u)) ? u : null;
   const lastNotAd = (urls) => urls.filter(notAd).pop() || null;
 
   function findSource(video) {
