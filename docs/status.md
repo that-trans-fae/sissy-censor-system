@@ -55,7 +55,8 @@ Last updated Oct 19, 2026.
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, whitelist (built-in hosts, YouTube
   included, plus your own domains), censoring levels (Full, Cocks only, Only Women, Permissive, custom; any number of
-  presets, each listing what it censors), a Fast/Slow image model switch, every setting editable in custom
+  presets, each listing what it censors), a Fast/Slow image model switch, a resource consumption
+  switch (Minimal, Recommended, Maximum, custom), every setting editable in custom
   and applied live, and an optional PIN lock that reports wrong entries
   instead of locking out. Checked in a browser against a test container (whitelist, settings,
   PIN, phone layout). `https://scs.local` was only tested with curl through

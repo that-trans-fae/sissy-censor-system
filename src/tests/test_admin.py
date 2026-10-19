@@ -368,6 +368,40 @@ def test_presets_lock_detection_and_seed_custom(panel):
     assert app.cfg.detection.threshold == 0.5
 
 
+def test_resource_levels_lock_workers_and_seed_custom(panel):
+    client, app, _, path = panel
+    _, view = client("GET", "/admin/api/config")
+    r = view["resources"]
+    assert r["active"] == "recommended"
+    assert [(o["name"], o["label"], o["workers"], o["threads_per_worker"]) for o in r["options"]] == [
+        ("minimal", "Minimal", 2, 4), ("recommended", "Recommended", 4, 8),
+        ("maximum", "Maximum", 8, 16)]
+    shown = {(s["name"], k["key"]) for s in view["sections"] for k in s["keys"]}
+    assert ("model", "resource_levels") not in shown
+
+    r, view = client("POST", "/admin/api/config", {"set": {"model.resources": "maximum"}})
+    assert r.status == 200 and view["resources"]["active"] == "maximum"
+    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (8, 16)
+
+    # A level owns workers and threads.
+    r, body = client("POST", "/admin/api/config", {"set": {"model.workers": 3}})
+    assert r.status == 400 and "Custom" in body["error"]
+
+    # Custom starts from the level you had, then takes your own values.
+    r, view = client("POST", "/admin/api/config", {"set": {"model.resources": "custom"}})
+    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (8, 16)
+    assert (view["resources"]["workers"], view["resources"]["threads_per_worker"]) == (8, 16)
+    r, _ = client("POST", "/admin/api/config", {"set": {"model.workers": 3}})
+    assert r.status == 200 and app.cfg.model.workers == 3
+
+    # Back to a level: the custom values stay in the file but don't apply.
+    client("POST", "/admin/api/config", {"set": {"model.resources": "minimal"}})
+    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (2, 4)
+    assert "workers: 3" in path.read_text()
+    client("POST", "/admin/api/config", {"set": {"model.resources": "custom"}})
+    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (3, 16)
+
+
 def test_presets_list_what_they_censor(panel):
     client, *_ = panel
     _, view = client("GET", "/admin/api/config")

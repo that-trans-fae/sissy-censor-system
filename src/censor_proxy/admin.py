@@ -77,7 +77,9 @@ RESTART_KEYS = frozenset({"proxy.internal_port", "admin.enabled", "admin.bind", 
 HIDDEN_KEYS = frozenset({"admin.pin_hash"})
 # Settable, but edited in config.yaml rather than shown as fields: the panel
 # offers them as choices (the censoring level, the model list).
-NOT_SHOWN_KEYS = frozenset({"detection.presets", "model.available"})
+NOT_SHOWN_KEYS = frozenset({"detection.presets", "model.available", "model.resource_levels"})
+# The keys a resource level sets (model.resource_levels).
+RESOURCE_KEYS = ("workers", "threads_per_worker")
 NULLABLE_KEYS = frozenset({"logging.path", "detection.label_thresholds", "admin.attempts_log",
                            "video_attribution.model_path"})
 PIN = re.compile(r"^\d{4,12}$")
@@ -326,6 +328,7 @@ class UserConfigFile:
         defaults = config.defaults()
         doc = self.read()
         before = self._preset(doc)
+        before_resources = self._resources(doc)
         for dotted, value in sets.items():
             section, key = _split(dotted, defaults, allow_hidden)
             _check_type(dotted, value, defaults[section][key])
@@ -340,6 +343,7 @@ class UserConfigFile:
         for dotted in resets:
             _remove(doc, *_split(dotted, defaults, allow_hidden))
         self._check_preset(doc, before, [*sets, *resets], defaults)
+        self._check_resources(doc, before_resources, [*sets, *resets], defaults)
         try:
             cfg = config.from_override(_plain(doc))
         except ConfigError as e:
@@ -375,6 +379,38 @@ class UserConfigFile:
         for key, value in ((old_presets.get(old) or {}).get("settings") or {}).items():
             if key not in detection_keys and value != defaults["detection"][key]:
                 doc["detection"][key] = value
+
+    @staticmethod
+    def _resources(doc: CommentedMap) -> tuple[str, dict]:
+        """(resource level name, levels) as the file has them."""
+        try:
+            m = config.merged(_plain(doc), apply_preset=False)["model"]
+        except ConfigError as e:
+            raise AdminError(400, str(e)) from e
+        levels = m["resource_levels"]
+        return str(m["resources"]), levels if isinstance(levels, dict) else {}
+
+    def _check_resources(self, doc: CommentedMap, before: tuple[str, dict],
+                         changed: list[str], defaults: dict) -> None:
+        """Workers and threads are the level's while one is chosen. Switching
+        to custom with neither saved starts from the previous level."""
+        name, levels = self._resources(doc)
+        keys = [k for k in changed if k in {f"model.{r}" for r in RESOURCE_KEYS}]
+        if name != config.CUSTOM_RESOURCES:
+            if keys:
+                label = (levels.get(name) or {}).get("label") or name
+                raise AdminError(400, f"Workers and threads come from the {label} resource "
+                                      "level. Choose Custom to set them yourself.")
+            return
+        old, old_levels = before
+        saved = doc.get("model")
+        if (old == config.CUSTOM_RESOURCES or not isinstance(saved, dict)
+                or any(k in saved for k in RESOURCE_KEYS)):
+            return
+        for key in RESOURCE_KEYS:
+            value = (old_levels.get(old) or {}).get(key)
+            if f"model.{key}" not in keys and value is not None and value != defaults["model"][key]:
+                saved[key] = value
 
     def write(self, doc: CommentedMap) -> None:
         buf = io.StringIO()
@@ -577,6 +613,8 @@ class AdminServer:
             sections.append({"name": section, "keys": keys})
         detection = current["detection"]
         presets = detection["presets"] or {}
+        levels = current["model"]["resource_levels"]
+        levels = levels if isinstance(levels, dict) else {}
         models = []
         for m in current["model"]["available"] or ():
             path = m.get("path") or None
@@ -591,7 +629,14 @@ class AdminServer:
                                         "description": (p or {}).get("description") or "",
                                         "censors": preset_censors(p, defaults["detection"])}
                                        for n, p in presets.items()]},
-                "models": models}
+                "models": models,
+                "resources": {"active": str(current["model"]["resources"]),
+                              "workers": current["model"]["workers"],
+                              "threads_per_worker": current["model"]["threads_per_worker"],
+                              "options": [{"name": n, "label": (l or {}).get("label") or "",
+                                           "description": (l or {}).get("description") or "",
+                                           **{k: (l or {}).get(k) for k in RESOURCE_KEYS}}
+                                          for n, l in levels.items()]}}
 
 
 class _Handler(BaseHTTPRequestHandler):

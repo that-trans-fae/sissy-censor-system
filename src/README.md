@@ -181,10 +181,17 @@ Tabs:
 - **Detections**: the latest entries of the detection log, filterable. No
   images, just hosts, labels and scores.
 - **Video**: video jobs with their progress, and a button to cancel them.
-- **Settings**: two switches, plus every option in Custom mode.
+- **Settings**: three switches, plus every option in Custom mode.
   - **Image model**: Fast (320n) or Slow (640m), one choice per entry in
     `model.available` (its `label`). The video model has its own dropdown,
     because 640m can't keep up with video.
+  - **Resource consumption** (`model.resources`): how many images are
+    scanned at once (`model.workers`) and the onnxruntime threads they
+    share (`model.threads_per_worker`). Minimal is 2 and 4, Recommended
+    (the default) 4 and 8, Maximum 8 and 16; the levels live in
+    `model.resource_levels`. Custom takes the two numbers from its own
+    inputs, starting from the level you had. Applies at once (the model
+    reloads).
   - **Censoring level** (`detection.preset`):
     - **Full**: no nudity of any kind, men's included.
     - **Cocks only**: only penises pass; men's buttocks and anus are

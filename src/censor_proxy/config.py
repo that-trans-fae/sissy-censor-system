@@ -16,6 +16,8 @@ CONFIG_ENV = "CENSOR_CONFIG"
 
 CENSOR_STYLES = ("gaussian", "pixelate", "solid")
 CUSTOM_PRESET = "custom"
+# model.resources value that uses model.workers and threads_per_worker as written.
+CUSTOM_RESOURCES = "custom"
 # Detection keys a preset can't set.
 PRESET_KEYS = frozenset({"preset", "presets"})
 LOG_LEVELS = ("off", "info", "debug")
@@ -37,9 +39,20 @@ class ModelChoice:
 
 
 @dataclass(frozen=True)
+class ResourceLevel:
+    name: str
+    label: str
+    description: str
+    workers: int
+    threads_per_worker: int
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     path: str | None
     resolution: int
+    resources: str
+    resource_levels: tuple[ResourceLevel, ...]
     workers: int
     threads_per_worker: int
     tiling: bool
@@ -51,6 +64,12 @@ class ModelConfig:
             if m.path == path and (path is None or m.resolution == resolution):
                 return m.name if m.label == m.name else f"{m.label} ({m.name})"
         return path or "320n (bundled)"
+
+    @property
+    def resources_label(self) -> str:
+        """The resource level's label, or the name (custom) if it has none."""
+        level = next((l for l in self.resource_levels if l.name == self.resources), None)
+        return level.label if level else self.resources.capitalize()
 
 
 @dataclass(frozen=True)
@@ -316,8 +335,31 @@ def _build(raw: dict[str, Any]) -> Config:
                                          resolution=int(entry["resolution"])))
         except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise ConfigError(f"model.available: each entry needs name and resolution ({e})") from e
+    if not isinstance(m["resource_levels"] or {}, dict):
+        raise ConfigError("model.resource_levels must be a mapping")
+    if CUSTOM_RESOURCES in (m["resource_levels"] or {}):
+        raise ConfigError(f"model.resource_levels: '{CUSTOM_RESOURCES}' is reserved")
+    levels = []
+    for name, entry in (m["resource_levels"] or {}).items():
+        try:
+            levels.append(ResourceLevel(name=str(name), label=str(entry.get("label") or name),
+                                        description=str(entry.get("description") or ""),
+                                        workers=int(entry["workers"]),
+                                        threads_per_worker=int(entry["threads_per_worker"])))
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            raise ConfigError(f"model.resource_levels.{name}: needs workers and "
+                              f"threads_per_worker ({e})") from e
+    resources = str(m["resources"])
+    level = next((l for l in levels if l.name == resources), None)
+    if level is None and resources != CUSTOM_RESOURCES:
+        raise ConfigError(f"model.resources must be {CUSTOM_RESOURCES} or one of "
+                          f"{[l.name for l in levels]}, got {resources!r}")
+    if level:
+        # A level owns the two keys; config.yaml's values are kept but ignored.
+        m = {**m, "workers": level.workers, "threads_per_worker": level.threads_per_worker}
     sections = {
-        "model": ModelConfig(**{**m, "available": tuple(available)}),
+        "model": ModelConfig(**{**m, "available": tuple(available), "resources": resources,
+                                "resource_levels": tuple(levels)}),
         "detection": DetectionConfig(
             preset=str(d["preset"]),
             preset_label=str(((d.get("presets") or {}).get(d["preset"]) or {}).get("label") or ""),
@@ -385,6 +427,10 @@ def _build(raw: dict[str, Any]) -> Config:
 
 
 def _validate(cfg: Config) -> None:
+    if cfg.model.workers < 1 or cfg.model.threads_per_worker < 1:
+        raise ConfigError("model.workers and model.threads_per_worker must be >= 1")
+    if any(l.workers < 1 or l.threads_per_worker < 1 for l in cfg.model.resource_levels):
+        raise ConfigError("model.resource_levels: workers and threads_per_worker must be >= 1")
     if cfg.censor.style not in CENSOR_STYLES:
         raise ConfigError(f"censor.style must be one of {CENSOR_STYLES}, got {cfg.censor.style!r}")
     if cfg.logging.level not in LOG_LEVELS:

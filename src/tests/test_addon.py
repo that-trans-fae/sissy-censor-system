@@ -28,7 +28,7 @@ def png(w, h):
 @pytest.fixture
 def busy(make_config):
     """An addon whose only detection worker is stuck on a slow image."""
-    cfg = make_config("logging: {level: 'off'}\nmodel: {workers: 1}\n")
+    cfg = make_config("logging: {level: 'off'}\nmodel: {resources: custom, workers: 1}\n")
     addon = addon_module.CensorAddon()
     addon.cfg = cfg
     addon.censor = Censor(cfg, FakeDetector())

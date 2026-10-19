@@ -9,7 +9,32 @@ model:
   path: null
   # Must match the model: 640 for 640m, 320 for 320n.
   resolution: 320
-  # Concurrent inference workers, and onnxruntime threads per worker.
+  # Resource consumption: a name from `resource_levels`, which sets workers
+  # and threads_per_worker, or custom to use those two keys as written.
+  # Picked at the top of the admin panel's Settings tab.
+  resources: recommended
+  # Each level's workers and threads_per_worker, and a label and description
+  # for the panel. Sized for a 16-CPU Docker VM: throughput levels off around
+  # 4 workers and 8 threads, so Maximum mostly buys more images in flight at
+  # once. config.yaml can replace the whole mapping.
+  resource_levels:
+    minimal:
+      label: Minimal
+      description: Leaves most of the computer free. Image-heavy pages fill in slowly.
+      workers: 2
+      threads_per_worker: 4
+    recommended:
+      label: Recommended
+      description: Fast on most pages, with room left for the browser.
+      workers: 4
+      threads_per_worker: 8
+    maximum:
+      label: Maximum
+      description: As fast as this computer allows. Can slow other programs while pages load.
+      workers: 8
+      threads_per_worker: 16
+  # Concurrent inference workers, and onnxruntime threads per worker. Used
+  # only when resources is custom; a level sets both otherwise.
   workers: 2
   threads_per_worker: 4
   # Also scan tall or wide images as overlapping square tiles. Catches small
