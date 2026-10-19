@@ -156,11 +156,32 @@ install_docker_desktop_macos() {
   fi
   if [ -d /Applications/Docker.app ]; then
     log "Docker Desktop is already installed"
+  else
+    log "Installing Docker Desktop"
+    brew_cask_install docker-desktop || true
+    [ -d /Applications/Docker.app ] || die "Docker Desktop did not install; see Homebrew's output above"
+  fi
+  setup_docker_desktop_macos
+}
+
+# Docker Desktop's first start asks, in its own window, to accept the Docker
+# Subscription Service Agreement and for an admin password for its helpers.
+# Its install command does both up front (--accept-license, --user), so the
+# agreement is asked here in the terminal instead. Only before that first
+# start: Docker Desktop writes its settings store then.
+DOCKER_TERMS=https://www.docker.com/legal/docker-subscription-service-agreement
+setup_docker_desktop_macos() {
+  local group="$HOME/Library/Group Containers/group.com.docker"
+  [ -e "$group/settings-store.json" ] || [ -e "$group/settings.json" ] && return
+  echo "    Docker Desktop needs the Docker Subscription Service Agreement accepted:"
+  echo "    $DOCKER_TERMS"
+  if ! ask "Accept it?"; then
+    echo "    Then accept it in Docker Desktop's window when it opens."
     return
   fi
-  log "Installing Docker Desktop"
-  brew_cask_install docker-desktop || true
-  [ -d /Applications/Docker.app ] || die "Docker Desktop did not install; see Homebrew's output above"
+  log "Setting up Docker Desktop"
+  sudo /Applications/Docker.app/Contents/MacOS/install --accept-license --user="$USER" \
+    || warn "Docker Desktop's setup failed; accept the agreement in its window when it opens"
 }
 
 GROUP_ADDED=0
@@ -183,8 +204,8 @@ start_docker() {
   local waited=0
   until docker info >/dev/null 2>&1; do
     if [ "$waited" -eq 0 ]; then
-      echo "    Waiting for Docker Desktop. On first start, accept the service agreement"
-      echo "    in its window and leave it running."
+      echo "    Waiting for Docker Desktop. If its window asks you to accept the service"
+      echo "    agreement, accept it and leave Docker Desktop running."
     fi
     [ "$waited" -lt 900 ] || die "Docker Desktop did not become ready within 15 minutes"
     sleep 5; waited=$((waited + 5))
