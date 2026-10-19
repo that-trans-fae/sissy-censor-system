@@ -150,6 +150,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/debug" and self.app.cfg.video.debug:
+            if self._origin() is None:  # only our script's pages may write to the log
+                return self._json(403, {"error": "origin not allowed"})
             length = int(self.headers.get("Content-Length") or 0)
             log.warning("inject.js: %s", self.rfile.read(min(length, 8192)).decode(errors="replace"))
             self.send_response(HTTPStatus.NO_CONTENT)

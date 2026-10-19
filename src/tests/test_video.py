@@ -157,6 +157,22 @@ def test_start_takes_referer_from_origin_not_page(cfg, tmp_path, monkeypatch):
     assert jobs.start("https://93.184.215.14/w.mp4").referer is None
 
 
+def test_job_ids_are_random_and_per_origin(cfg, tmp_path, monkeypatch):
+    # A page that knows a video URL must not be able to derive the id of a
+    # job another site started, nor get a cache hit that tells it ran.
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path)))
+    monkeypatch.setattr("censor_proxy.video.censor_video", lambda *a: None)
+    src = "https://93.184.215.14/v.mp4"
+    a = VideoJobs(cfg, FakeDetector()).start(src, "https://a.example")
+    jobs = VideoJobs(cfg, FakeDetector())
+    b = jobs.start(src, "https://a.example")
+    assert a.id != b.id and len(b.id) == 24  # not a function of the source
+    assert jobs.start(src, "https://a.example") is b  # same page origin: reused
+    c = jobs.start(src, "https://c.example")
+    assert c is not b and c.id != b.id  # another origin: its own job
+    assert jobs.get(b.id) is b and jobs.get(c.id) is c
+
+
 def test_queue_cap_refuses_further_jobs(cfg, tmp_path, monkeypatch):
     cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path), max_concurrent_jobs=1,
                                      max_queued_jobs=1))
@@ -191,6 +207,9 @@ def test_rate_limit_is_per_origin(cfg, tmp_path, monkeypatch):
 @pytest.mark.parametrize("src", [
     "file:///etc/passwd", "ftp://example.com/v.mp4", "http://127.0.0.1:8081/health",
     "http://localhost/v.mp4", "http://192.168.1.1/v.mp4", "http://[::1]/v.mp4", "http://10.0.0.5/x.m3u8",
+    # Other spellings of loopback: IPv4-mapped IPv6, hex and decimal.
+    "http://[::ffff:127.0.0.1]/v.mp4", "http://0x7f000001/v.mp4", "http://2130706433/v.mp4",
+    "http://169.254.169.254/latest/meta-data", "http://0.0.0.0/v.mp4",
 ])
 def test_jobs_reject_non_public_sources(cfg, src):
     with pytest.raises(VideoError):
@@ -298,6 +317,21 @@ def test_server_passes_origin_and_page_to_jobs(server, monkeypatch):
         raise JobRefused("too many")
     monkeypatch.setattr(jobs, "start", refuse)
     assert post_job(base, b'{"src": "https://example.com/v.mp4"}') == 429
+
+
+def test_debug_beacon_needs_allowlisted_origin(server, monkeypatch):
+    srv, jobs, base = server
+    monkeypatch.setattr(srv, "cfg", replace(srv.cfg, video=replace(srv.cfg.video, debug=True)))
+
+    def post(origin):
+        req = urllib.request.Request(base + "/debug", data=b'{"event": "x"}', method="POST",
+                                     headers={"Origin": origin} if origin else {})
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as e:
+            return e.code
+    assert post("https://evil.example") == 403 and post(None) == 403
+    assert post("https://www.reddit.com") == 204
 
 
 def test_server_job_status_and_errors(server):

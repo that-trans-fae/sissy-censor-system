@@ -42,5 +42,7 @@ ENV CENSOR_CONFIG=/config/config.yaml
 # No stream_large_bodies: mitmproxy applies it after the addon's
 # responseheaders hook, which would stream large images past the censor. The
 # addon streams every body it doesn't need to inspect instead.
+# The CA lives outside /root so the service can run as an unprivileged user
+# (compose.yaml sets one); the directory is bind-mounted from ./mitmproxy.
 CMD ["mitmdump", "-s", "/app/censor.py", "--listen-port", "8080", \
-     "--set", "confdir=/root/.mitmproxy"]
+     "--set", "confdir=/mitmproxy"]

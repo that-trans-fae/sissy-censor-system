@@ -73,8 +73,9 @@ proxy
    - The same `decide()` rules and censor styles as images.
    - ffmpeg re-encodes H.264 (veryfast) into fragmented MP4 so playback
      starts before the job finishes; audio is copied.
-   - Finished outputs are cached by source URL so replays and seeks are
-     instant; the cache is size-capped.
+   - Finished outputs are cached by source URL and page origin so replays
+     and seeks are instant; the cache is size-capped. Job ids are random,
+     so a page can't derive another site's job from a video URL.
    - Jobs run `video.max_concurrent_jobs` at a time; the rest queue, and
      the control says so. The script checks in every 2 s, saying whether
      the video is wanted now (being prepared or playing in a visible tab)
