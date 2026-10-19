@@ -326,13 +326,6 @@ video:
   # Start the censored copy muted; its controls unmute it. false takes the
   # muted state of the page's own video.
   start_muted: true
-  # Treat a video inside a link as a hover preview (thumbnails that play a
-  # clip under the pointer, as on Pornhub and YouPorn): its card shows the
-  # video's poster, has no play button and lets the pointer through, so the
-  # page keeps its hover and a click follows the link. false gives previews
-  # the full card, which takes the pointer; sites that drop the preview when
-  # the pointer leaves the thumbnail then make it flicker.
-  link_previews: true
   # x264 settings for the censored copy.
   preset: veryfast
   crf: 23

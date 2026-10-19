@@ -26,7 +26,9 @@ LOG_LEVELS = ("off", "info", "debug")
 # older image still loads after an automatic update (unknown keys are
 # rejected): "section.key" (or a whole "section") mapped to its new name, or
 # to None when it was dropped. Never reuse a dropped name.
-MIGRATIONS: dict[str, str | None] = {}
+MIGRATIONS: dict[str, str | None] = {
+    "video.link_previews": None,  # Oct 19, 2026: cards are hidden from hover handling instead
+}
 DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)*"
                     r"[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$")
 
@@ -171,7 +173,6 @@ class VideoConfig:
     padding: float
     audio: bool
     start_muted: bool
-    link_previews: bool
     preset: str
     crf: int
     ready_seconds: float

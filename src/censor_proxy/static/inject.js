@@ -4,8 +4,7 @@
 //
 // Video: every video is paused and covered. "Play censored" asks the proxy
 // for a censored copy and plays it in our own <video> laid over the original.
-// Videos whose source can't be found stay covered. Hover previews inside
-// links are covered by their poster instead, and let the pointer through.
+// Videos whose source can't be found stay covered.
 //
 // Images: an image still loading a moment after it comes into view (most
 // often waiting its turn in the censor) gets a placeholder until it arrives.
@@ -28,7 +27,6 @@
   });
   const VIDEO = "__VIDEO__" === "true";                  // video.enabled
   const START_MUTED = "__START_MUTED__" === "true";      // video.start_muted
-  const LINK_PREVIEWS = "__LINK_PREVIEWS__" === "true";  // video.link_previews
   const PLACEHOLDERS = "__PLACEHOLDERS__" === "true";    // images.placeholders
   const PLACEHOLDER_MS = Number("__PLACEHOLDER_MS__");   // images.placeholder_delay_ms
   const PLACEHOLDER_MIN_PX = Number("__PLACEHOLDER_MIN_PX__");  // images.placeholder_min_px
@@ -138,20 +136,6 @@
       video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
       .card.playing { padding: 0; }
       .card.playing > :not(video) { display: none !important; }
-      /* Link previews: the video's poster (an image, so censored by the
-         proxy) and a small mark; the pointer passes through to the page. */
-      .card > .mark { display: none; }
-      .card.preview { padding: 0; pointer-events: none; background: var(--censor-bg) center / cover no-repeat; }
-      .card.preview > :not(.mark) { display: none !important; }
-      .card.preview > .mark {
-        display: block; position: absolute; left: 8px; bottom: 8px; width: 24px; height: 24px;
-        padding: 5px; box-sizing: border-box; border-radius: 6px;
-        background: var(--censor-bg); color: var(--censor-accent);
-      }
-      .card.preview > .mark svg { width: 100%; height: auto; }
-      .card.preview:not(.poster) > .mark {
-        position: static; width: clamp(14px, 22cqmin, 40px); height: auto; padding: 0; background: none;
-      }
       /* Small players: the brand name goes first, then the extra copy; the
          button always stays. */
       @container (max-width: 380px) or (max-height: 230px) {
@@ -301,11 +285,84 @@
   }
   if (VIDEO) blockPlayback(window);
 
+  // ---- Keep cards out of the page's hover handling ----------------------
+  // A card that appears under the pointer takes it from whatever the page
+  // had it over. Hover previews (Pornhub, YouPorn) add a <video> next to
+  // the thumbnail on mouseover and drop it on mouseout, so the card made
+  // the preview, and the card with it, go and come back over and over.
+  // Pointer and mouse over/out/enter/leave events involving a card are
+  // stopped before the page sees them; the page sees the pointer go
+  // straight from what it was over before the card to what it is over
+  // after.
+  const isCard = (node) => !!node && node.localName === "censor-proxy-card";
+
+  // Elements from node up to the root of its tree, innermost first.
+  function ancestry(node) {
+    const list = [];
+    for (; node && node.nodeType === 1; node = node.parentNode) list.push(node);
+    return list;
+  }
+
+  // Send what the page would have seen had the pointer gone from `from` to
+  // `to` (either may be null) with no card in between.
+  function moved(kind, from, to, e) {
+    if (!from && !to) return;
+    const w = (to || from).ownerDocument.defaultView;
+    const Event = kind === "pointer" ? w.PointerEvent : w.MouseEvent;
+    const send = (target, type, related, bubbles) => target.dispatchEvent(new Event(kind + type, {
+      bubbles, cancelable: bubbles, composed: bubbles, view: w, relatedTarget: related || null,
+      screenX: e.screenX, screenY: e.screenY, clientX: e.clientX, clientY: e.clientY,
+      ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey,
+      button: e.button, buttons: e.buttons, pointerId: e.pointerId, pointerType: e.pointerType,
+      isPrimary: e.isPrimary, width: e.width, height: e.height, pressure: e.pressure,
+    }));
+    const left = ancestry(from), entered = ancestry(to);
+    if (from) {
+      send(from, "out", to, true);
+      for (const n of left) if (!entered.includes(n)) send(n, "leave", to, false);
+    }
+    if (to) {
+      send(to, "over", from, true);
+      for (const n of entered.reverse()) if (!left.includes(n)) send(n, "enter", from, false);
+    }
+  }
+
+  // Installed on each window and shadow root a card can be in: events in a
+  // shadow root reach the window retargeted to its host.
+  function hideCards(target) {
+    const behind = {};  // per kind: what the page saw the pointer over before it went onto a card
+    for (const kind of ["pointer", "mouse"]) {
+      for (const type of ["over", "out", "enter", "leave"]) {
+        target.addEventListener(kind + type, (e) => {
+          if (!e.isTrusted) return;  // sent by moved()
+          const t = e.target, related = e.relatedTarget;
+          if (isCard(t) || isCard(related)) {
+            e.stopImmediatePropagation();
+            if (type !== "out") return;
+            if (!isCard(t)) behind[kind] = t;  // onto a card
+            else if (!isCard(related)) {       // off a card (not onto another)
+              const from = behind[kind];
+              behind[kind] = null;
+              if (from !== related) moved(kind, from, related, e);
+            }
+          } else if (type === "over" && behind[kind]) {
+            // The card was removed under the pointer: no out event for it.
+            const from = behind[kind];
+            behind[kind] = null;
+            if (from !== t) moved(kind, from, null, e);
+          }
+        }, true);
+      }
+    }
+  }
+  if (VIDEO) hideCards(window);
+
   // ---- Find videos and images, including inside shadow roots ------------
   const origAttachShadow = Element.prototype.attachShadow;
   function watchShadows(w, attach) {
     w.Element.prototype.attachShadow = function () {
       const root = attach.apply(this, arguments);
+      if (VIDEO) hideCards(root);
       watch(root);
       return root;
     };
@@ -342,6 +399,7 @@
     if (!w[RAN]) {
       Object.defineProperty(w, RAN, { value: true });
       blockPlayback(w);
+      hideCards(w);
       watchShadows(w, w.Element.prototype.attachShadow);
     }
     if (!d[RAN]) {
@@ -432,7 +490,7 @@
 
   function guard(video) {
     if (ours.has(video) || guarded.has(video)) return;
-    const info = { ...describe(video), preview: LINK_PREVIEWS && inLink(video) };
+    const info = describe(video);
     if (!reported.has(info.src)) {  // sites that recreate players would flood the log
       reported.add(info.src);
       report("guard", info);
@@ -458,47 +516,11 @@
       e.stopPropagation();
       start(video, state);
     });
-    const mark = el("div", "mark");
-    mark.appendChild(icon("mark"));
-    card.append(mark, brand, badge, msg, detail, button, bar);
-    const state = { card, host: makeHost(card), brand, badge, msg, detail, bar, button, player: null, jobId: null,
-                    frames: 0, container: null, preview: false, poster: "" };
+    card.append(brand, badge, msg, detail, button, bar);
+    const state = { card, host: makeHost(card), brand, badge, msg, detail, bar, button, player: null, jobId: null, frames: 0, container: null };
     show(state, "idle");
     guarded.set(video, state);
     startPositioning();
-  }
-
-  // A video inside a link is a preview of what the link opens (thumbnails
-  // that play a clip under the pointer): a click there follows the link, so
-  // no real player sits in one. Its card must not take the pointer, or the
-  // page sees the pointer leave the thumbnail, drops the preview, and adds
-  // it back when the card goes: a flicker (Pornhub, YouPorn).
-  function inLink(video) {
-    for (const node of around(video)) {
-      if (node.localName === "a" && node.hasAttribute("href")) return true;
-    }
-    return false;
-  }
-
-  // Switch a card between the full card and the preview card, and keep the
-  // preview's poster current. Only http(s) posters: those come through the
-  // proxy, censored like any image; a data: or blob: one might not have.
-  function previewMode(video, state) {
-    const preview = LINK_PREVIEWS && !state.player && inLink(video);
-    const poster = preview && httpUrl(video.getAttribute("poster")) || "";
-    const card = state.card;
-    if (preview !== state.preview) {
-      state.preview = preview;
-      card.classList.toggle("preview", preview);
-      state.host.style.setProperty("pointer-events", preview ? "none" : "auto", "important");
-    }
-    if (poster !== state.poster) {
-      state.poster = poster;
-      card.classList.toggle("poster", !!poster);
-      card.style.backgroundImage = poster ? `url(${JSON.stringify(poster)})` : "";
-    }
-    if (preview) card.style.borderRadius = getComputedStyle(video).borderRadius;
-    else card.style.removeProperty("border-radius");
   }
 
   function show(state, mode, why) {
@@ -608,7 +630,6 @@
       // and rebuild their markup while they load.
       const s = host.style;
       if (++state.frames % 30 === 1) {
-        previewMode(video, state);
         state.container = playerBox(video, r);
         const z = state.container ? String(stackAbove(state.container)) : "2147483647";
         if (z !== state.z) s.setProperty("z-index", state.z = z, "important");

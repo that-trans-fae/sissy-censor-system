@@ -71,11 +71,10 @@ Last updated Oct 19, 2026.
   curl. Then: random per-origin job ids, the debug beacon gated on origin,
   and the service running as an unprivileged user with the confdir at
   `/mitmproxy` (needs `docker compose up -d --build`)
-- Hover previews (Oct 19, 2026): a video inside a link gets a card that
-  shows its poster and lets the pointer through (`video.link_previews`),
-  so Pornhub's and YouPorn's thumbnails no longer flicker under the
-  pointer. Worked out from the sites' preview scripts and confirmed in
-  the browser
+- Hover previews (Oct 19, 2026): cards are hidden from the page's hover
+  events, so Pornhub's and YouPorn's thumbnail previews no longer flicker
+  under the pointer, and previews and ads keep "Play censored". Confirmed
+  in the browser
 - Censored videos start muted (`video.start_muted`, on by default, a
   toggle in the admin panel's Video settings). Unit-tested only, not yet
   checked in a browser

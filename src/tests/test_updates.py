@@ -56,6 +56,10 @@ def test_migrations_apply_before_unknown_keys_are_rejected(monkeypatch):
     assert cfg.censor.style == "solid"
 
 
+def test_dropped_keys_still_load():
+    from_override({"video": {"link_previews": False}})
+
+
 def test_migrations_point_at_real_keys():
     defaults = config.defaults()
     for old, new in config.MIGRATIONS.items():

@@ -404,7 +404,6 @@ def test_server_health_and_inject_js(server):
     assert b'"__' not in body  # every template value filled in
     assert b'"true" === "true";                  // video.enabled' in body
     assert b'"true" === "true";      // video.start_muted' in body
-    assert b'"true" === "true";  // video.link_previews' in body
     assert b'Number("400")' in body  # images.placeholder_delay_ms
     # video.ad_sources: a JSON list inside a JS string literal.
     assert b'JSON.parse("[\\"/pre_videos/\\"]")' in body
