@@ -213,6 +213,7 @@ details.section .count { color: var(--muted); font-weight: 400; font-size: .85re
   border: 2px solid var(--muted); box-sizing: border-box;
 }
 .level .desc { color: var(--muted); font-size: .85rem; }
+.level .censors { margin: 0; padding-left: 1.2rem; font-size: .9rem; }
 .level.active { border-color: var(--accent); background: var(--accent-soft); }
 .level.active .title::before { border-color: var(--accent); background: radial-gradient(var(--accent) 40%, transparent 46%); }
 .alert { border-color: var(--danger); }

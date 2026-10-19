@@ -366,6 +366,21 @@ def test_presets_lock_detection_and_seed_custom(panel):
     assert app.cfg.detection.threshold == 0.5
 
 
+def test_presets_list_what_they_censor(panel):
+    client, *_ = panel
+    _, view = client("GET", "/admin/api/config")
+    censors = {o["name"]: o["censors"] for o in view["preset"]["options"]}
+    assert censors["strict"] == ["Exposed breasts", "Exposed genitalia",
+                                 "Exposed buttocks", "Exposed anus"]
+    assert censors["lax"] == ["Exposed genitalia", "Exposed buttocks", "Exposed anus"]
+
+
+def test_label_names():
+    assert admin_mod.label_name("FEMALE_BREAST_COVERED") == "Covered breasts"
+    assert admin_mod.label_name("FEET_EXPOSED") == "Exposed feet"
+    assert admin_mod.label_name("FACE_FEMALE") == "Face"
+
+
 def test_any_number_of_presets_offered(panel):
     client, app, _, path = panel
     extra = "".join(f"    level{i}:\n      description: Level {i}\n      settings:\n"

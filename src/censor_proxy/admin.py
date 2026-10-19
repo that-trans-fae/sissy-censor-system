@@ -85,6 +85,23 @@ COOKIE = "scs_admin"
 PBKDF2_ITERATIONS = 200_000
 MAX_BODY = 65536
 LOG_TAIL_BYTES = 8 * 1024 * 1024
+# Body parts as a censoring level lists them; others are named from the label.
+PART_NAMES = {"BREAST": "breasts", "ARMPITS": "armpits", "FEET": "feet"}
+
+
+def label_name(label: str) -> str:
+    """A NudeNet label for people: FEMALE_BREAST_EXPOSED -> Exposed breasts."""
+    words = [w for w in str(label).upper().split("_") if w not in ("FEMALE", "MALE")]
+    state = words.pop().capitalize() if words and words[-1] in ("EXPOSED", "COVERED") else ""
+    part = " ".join(PART_NAMES.get(w, w.lower()) for w in words)
+    return f"{state} {part}".strip() if state else part.capitalize()
+
+
+def preset_censors(preset: dict | None, base: dict) -> list[str]:
+    """What a preset censors: its female and unsexed labels, named."""
+    d = {**base, **((preset or {}).get("settings") or {})}
+    labels = [*(d.get("female_labels") or ()), *(d.get("unsexed_labels") or ())]
+    return list(dict.fromkeys(label_name(l) for l in labels))
 
 
 class App(Protocol):
@@ -564,7 +581,8 @@ class AdminServer:
         return {"path": str(self.file.path) if self.file.path else None,
                 "editable": self.file.editable, "error": error, "sections": sections,
                 "preset": {"active": detection["preset"],
-                           "options": [{"name": n, "description": (p or {}).get("description") or ""}
+                           "options": [{"name": n, "description": (p or {}).get("description") or "",
+                                        "censors": preset_censors(p, defaults["detection"])}
                                        for n, p in presets.items()]},
                 "models": models}
 

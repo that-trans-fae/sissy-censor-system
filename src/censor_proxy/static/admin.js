@@ -554,7 +554,10 @@
           if (err.status !== 401) $("cfg-error").textContent = err.message;
         }
       },
-    }, h("span", { class: "title", text: title(o.name) }), h("span", { class: "desc", text: o.description }))));
+    }, h("span", { class: "title", text: title(o.name) }),
+       o.censors && o.censors.length
+         ? h("ul", { class: "censors" }, ...o.censors.map((c) => h("li", { text: c }))) : null,
+       o.description ? h("span", { class: "desc", text: o.description }) : null)));
   }
 
   // The section's keys, with each model picker's pair of keys as one field.

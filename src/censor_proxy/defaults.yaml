@@ -39,17 +39,18 @@ detection:
   # uses the detection keys from config.yaml. Picked at the top of the admin
   # panel's Settings tab.
   preset: strict
-  # Each preset's description and the detection keys it changes. Add as
-  # many as you like under detection.presets in config.yaml: they merge with
-  # these by name (the same name replaces one, null removes it), and each
-  # shows up as a choice in the admin panel.
+  # Each preset's detection keys and an optional description. The panel
+  # lists what each one censors (its female_labels and unsexed_labels) and
+  # shows the description under that list. Add as many as you like under
+  # detection.presets in config.yaml: they merge with these by name (the
+  # same name replaces one, null removes it), and each shows up as a choice
+  # in the admin panel.
   presets:
     strict:
-      description: Exposed breasts, genitalia, buttocks and anus are censored.
       settings: {}
     lax:
-      description: Like strict, but exposed breasts pass. They still count as
-        female context, so buttocks next to them stay censored.
+      description: Exposed breasts pass, but still count as female context, so
+        buttocks next to them stay censored.
       settings:
         female_labels:
           - FEMALE_GENITALIA_EXPOSED

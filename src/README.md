@@ -192,16 +192,16 @@ Tabs:
   keeping its comments, and applies the change at once. Options marked
   "restart" (ports, the video cache and slots) take effect after
   `docker compose restart`. Add as many levels as
-  you like under `detection.presets` in `config/config.yaml`, each with a
-  `description` and the detection `settings` it changes. They merge with the
-  built-in ones by name (`lax: null` removes one), and each appears as a
-  choice:
+  you like under `detection.presets` in `config/config.yaml`, each with the
+  detection `settings` it changes and an optional `description`. They merge
+  with the built-in ones by name (`lax: null` removes one), and each appears
+  as a choice listing what it censors (its `female_labels` and
+  `unsexed_labels`), with the description under the list:
 
   ```yaml
   detection:
     presets:
       genitals-only:
-        description: Only exposed genitalia are censored.
         settings:
           female_labels: [FEMALE_GENITALIA_EXPOSED]
           unsexed_labels: []
