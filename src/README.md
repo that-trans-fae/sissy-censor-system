@@ -201,8 +201,8 @@ Open either:
 
 Tabs:
 
-- **Overview**: counts since start (censored, clean, whitelisted, failed
-  closed...), the model and the log level.
+- **Overview**: the running version, counts since start (censored,
+  clean, whitelisted, failed closed...), the model and the log level.
 - **Whitelist**: the [whitelist](#whitelist). Add or remove your domains;
   the built-in list is shown read-only below them. The checkbox is
   `whitelist.match_referer`.
@@ -305,7 +305,10 @@ tools/release.sh 1.2.0
 ```
 
 It needs a clean checkout and `docker login`, builds for amd64 and arm64,
-pushes `VERSION` and `latest`, and tags the commit `v1.2.0`. Installs pick
+pushes `VERSION` and `latest`, and tags the commit `v1.2.0`; push the tag to
+both remotes (`origin` and `gitlab`) afterwards. The version is baked into
+the image (`SCS_VERSION`) and shown in the startup log and on the panel's
+Overview; a local build says `dev`. Installs pick
 up `latest` the next time their computer starts, once the Sissy Browser is
 closed, and go back to the release they had if the new one's health check
 (`python -m censor_proxy.updates health`, the image's `HEALTHCHECK`) doesn't
@@ -328,11 +331,12 @@ tools/release.sh ...` on a scratch commit, or plain `docker build` and
 ## Test
 
 ```bash
-docker run --rm -v "$PWD/..:/w" -w /w/src censor-proxy \
-  sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q -p no:cacheprovider"
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/..:/w" -w /w/src censor-proxy \
+  sh -c "pip install -q --user -r requirements-dev.txt; python -m pytest -q -p no:cacheprovider"
 ```
 
-Rebuild the image first if `requirements.txt` changed; the code itself is
+Add `--deselect tests/test_samples.py` for a quick unit-test run. Rebuild
+the image first if `requirements.txt` changed; the code itself is
 mounted. Unit tests use a fake detector and need no weights.
 `tests/test_samples.py` runs each model against its confirmed fixture and needs
 the sample images in `docs/samples/` (not in git); known failures show as

@@ -115,7 +115,8 @@ Last updated Oct 19, 2026.
 
 - Installer (`install/`): one-line scripts run from GitHub for Linux,
   macOS and Windows (Docker Engine on Linux, Docker Desktop elsewhere,
-  clone, build, with `SCS_UNINSTALL=1` to reverse) that set up a dedicated "Sissy Browser" Chromium profile
+  the image pulled from Docker Hub, with `--uninstall` / `-Uninstall` to
+  reverse) that set up a dedicated "Sissy Browser" Chromium profile
   pinned to the proxy with its own icon, the admin panel on its bookmark
   bar and the proxy CA trusted in the profile's own certificate store (no
   flags, no system trust). Verified on Ubuntu with snap Chromium 155 and
@@ -130,13 +131,12 @@ Last updated Oct 19, 2026.
   an Intel Mac mini on macOS 15 with an old Homebrew and no Command Line
   Tools) failed at Docker Desktop several ways, all from Homebrew; the
   installer no longer uses Homebrew or python3 on macOS (direct, verified
-  downloads of Docker Desktop and ungoogled-chromium), not yet rerun past
-  Docker. Winget's `Hibbiki.Chromium` manifest 155.0.8059.85 is
-  marked `portable`, so a Windows machine with no Chromium may fail at
-  that step until the next manifest. The system-level installers were dropped and Linux moved from
-  Docker Desktop to Docker Engine (Oct 19, 2026); the Engine path is
-  syntax-checked only. The
-  repository URL is still a placeholder. `install/README.md` also
+  downloads of Docker Desktop and ungoogled-chromium). Windows installs
+  Chromium from Hibbiki's GitHub release rather than winget, whose
+  `Hibbiki.Chromium` manifest installed nothing. The system-level
+  installers were dropped and Linux moved from Docker Desktop to Docker
+  Engine (Oct 19, 2026). All platforms are now tested except macOS on
+  Apple silicon. `install/README.md` also
   spells out the install by hand (Oct 19, 2026), step for step as the
   scripts do it
 
@@ -149,12 +149,15 @@ Last updated Oct 19, 2026.
   `video.start_muted` further down); `tools/release.sh` publishes amd64
   and arm64. Verified on Linux against a local registry with three
   releases (pending while the browser ran, applied after, a broken release
-  rolled back and skipped, the panel switch) and with pytest against a
-  fake docker. Not yet: a real push to Docker Hub (`thattransfae/scs`) or
-  an arm64 build; the systemd timer, launchd
-  agent and Windows task are written but untried, and the PowerShell
-  updater is parse-checked only (its version lookup was fixed for
-  PowerShell 5.1 quoting on Oct 19, 2026, unreleased)
+  rolled back and skipped, the panel switch), with pytest against a fake
+  docker, and with real releases from Docker Hub on Linux, Windows and an
+  Intel Mac (not yet on Apple silicon)
+
+- Releases (Oct 19, 2026): 0.0.1 to 0.0.5 and then 1.0.0 published to
+  Docker Hub (`thattransfae/scs`) for amd64 and arm64, each tagged
+  `v<VERSION>` on both remotes. The running version is in the startup log
+  (`censor proxy ready: version=...`), on the panel's Overview and in its
+  Settings tab's Updates block
 
 - Video CPU use (Oct 19, 2026): the video model's threads capped
   (`video.max_threads`), one OpenCV thread per operation, and blurring and

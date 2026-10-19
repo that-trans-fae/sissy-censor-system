@@ -143,7 +143,8 @@ digest, waits for the image's `HEALTHCHECK`, and otherwise restores the
 old compose.yaml and digest and skips that release. When already up to
 date it puts back any of the running release's files (the updater, icons)
 that differ, finishing an update cut off mid-way. It writes
-`logs/update.json`, which the panel's Overview shows. The container never
+`logs/update.json`, which the panel's Settings tab shows (the running
+version is also on the Overview and in the startup log). The container never
 contacts Docker Hub and has no Docker socket. See `docs/decisions.md`.
 
 Upgrades must keep old installs working:

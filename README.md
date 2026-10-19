@@ -43,6 +43,15 @@ fetches on its own is a newer version of itself from Docker Hub.
 > Details, platform notes and how to uninstall are under
 > [Installing the Sissy Browser](#installing-the-sissy-browser).
 
+**Platforms**
+
+| Platform | Docker | Chromium | Status |
+| --- | --- | --- | --- |
+| Linux (Ubuntu, Debian, Fedora, Arch) | Docker Engine | snap or distribution package | Tested |
+| Windows 10 and 11 | Docker Desktop (WSL 2) | Hibbiki's build | Tested |
+| macOS on Intel | Docker Desktop | ungoogled-chromium | Tested |
+| macOS on Apple silicon | Docker Desktop | ungoogled-chromium | Not yet tested (the arm64 image is published) |
+
 **Contents**
 
 - [What it does](#what-it-does)
@@ -120,8 +129,8 @@ terms:
 Every scan is written to a local log (`~/scs/logs/detections.jsonl`) with
 the hostname, the labels found and their scores. No images are kept.
 
-An **admin panel** at <http://localhost:8082/admin> shows what has been
-censored, lets you switch models and censoring levels, manage the
+An **admin panel** at <http://localhost:8082/admin> shows the running
+version and what has been censored, lets you switch models and censoring levels, manage the
 whitelist, watch video jobs, turn automatic updates on or off, and lock
 all of that behind a PIN.
 
@@ -227,7 +236,7 @@ launchd agent on macOS, a scheduled task on Windows. Once each time you log
 in after the computer starts, it runs `scs-update`, which asks Docker Hub
 once whether there is a newer release. If there is, it waits until the
 Sissy Browser is closed, switches to the new image, waits for its health
-check to pass, and rolls back to the old one if it does not. The result shows on the admin panel's Overview tab. You can turn
+check to pass, and rolls back to the old one if it does not. The result shows at the top of the admin panel's Settings tab. You can turn
 automatic updates off there, or pin a version by setting the channel in
 `.env` to a tag such as `thattransfae/scs:1.2.0`.
 
@@ -392,12 +401,13 @@ video attribution, running the tests and cutting a release.
 
 Image and embedded-image censoring are complete and verified in Chromium.
 Video censoring works end to end, including seeking, and plays on real
-sites, but still has rough edges. The dedicated-browser installer is
-verified on Ubuntu; the macOS and Windows scripts are written and
-syntax-checked but not yet run on those systems. Automatic updates are
-verified against a local registry; nothing has been pushed to the Docker
-Hub repository ([`thattransfae/scs`](https://hub.docker.com/r/thattransfae/scs))
-yet.
+sites, but still has rough edges. The dedicated-browser installer and
+automatic updates are tested on Linux, Windows and Intel Macs; Apple
+silicon Macs are not tested yet (see the table at the top). Releases are
+published to Docker Hub
+([`thattransfae/scs`](https://hub.docker.com/r/thattransfae/scs)) for
+amd64 and arm64, the current one being 1.0.0, and installs update
+themselves at startup.
 
 Not yet: a system-wide proxy mode, Firefox support, and tuning the
 detection thresholds against more real browsing. The full list, with

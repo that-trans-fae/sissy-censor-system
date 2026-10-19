@@ -105,7 +105,7 @@ schedule after that. The run of `scs-update`:
 1. waits for Docker and the proxy to come up (Docker Desktop starts at
    login too), for up to 15 minutes.
 2. reads `updates.*` from your settings. With automatic updates off (the
-   switch on the admin panel's Overview) it stops here.
+   switch on the admin panel's Settings tab) it stops here.
 3. pulls `SCS_CHANNEL` (`thattransfae/scs:latest`) from Docker Hub, trying
    for up to ten minutes while the network comes up. This is the only thing
    the install sends to the internet on its own.
@@ -118,8 +118,8 @@ schedule after that. The run of `scs-update`:
    seconds. If it doesn't pass within five minutes, the old `compose.yaml`
    and image go back, and that release is skipped until a newer one is out.
 
-The result shows on the admin panel's Overview (Updates) and is logged in
-`update.log`. To check and update at once, even with the browser open:
+The result shows on the admin panel's Settings tab (Updates) and is logged
+in `update.log`. To check and update at once, even with the browser open:
 
 ```bash
 ~/scs/scs-update --now
@@ -184,7 +184,7 @@ container is stopped and its CA and settings are copied out of `~/scs/src`.
 - If another container already holds port 8080 (a development copy run from
   `src/`, say), the installer stops and names it.
 - The Windows task runs through `conhost --headless` so no console window
-  flashes up each hour.
+  flashes up when it runs.
 - macOS and Windows: Docker Desktop shows its service agreement on first
   start; the scripts wait (up to 15 minutes) until it is accepted and the
   engine is up.
