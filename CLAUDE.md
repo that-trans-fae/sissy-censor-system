@@ -230,5 +230,7 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
   with a CAPTCHA on every search, and an HTTP proxy can't carry QUIC; a
   bare CONNECT tunnel gets the same, so mitmproxy's TLS is not the trigger
   and no proxy config can fix it. The launchers bypass the proxy for
-  `www.google.com` and resolve it to `forcesafesearch.google.com`
-  (SafeSearch locked). Don't whitelist Google in the proxy for this.
+  `www.google.com` and the installers lock SafeSearch with Chromium's
+  `ForceGoogleSafeSearch` policy. Don't whitelist Google in the proxy for
+  this, and don't use `--host-resolver-rules` (or any flag on Chromium's
+  bad-flags list): it puts up the "unsupported command-line flag" bar.

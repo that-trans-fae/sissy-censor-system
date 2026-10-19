@@ -240,10 +240,11 @@ trusts the proxy's CA inside that profile's own certificate store (the
 macOS the launcher also starts the proxy container if it is not running.
 Google search is the one site it reaches directly rather than through the
 proxy: Google challenges a Chromium that can't use HTTP/3 with a CAPTCHA on
-every search, and an HTTP proxy can't carry HTTP/3. The launcher points
-`www.google.com` at Google's SafeSearch-locking address instead, so results
-are filtered at Google's end, and the Image Search thumbnails still load
-through the proxy and are censored.
+every search, and an HTTP proxy can't carry HTTP/3. The installer locks
+SafeSearch on in Chromium instead (the `ForceGoogleSafeSearch` policy, which
+covers every profile of that Chromium), so results are filtered at Google's
+end, and the Image Search thumbnails still load through the proxy and are
+censored.
 
 | Platform | Launcher | Profile |
 | --- | --- | --- |
@@ -268,7 +269,7 @@ through the proxy and are censored.
   (your bank, a health portal, work sign-in), add it on the **Whitelist**
   tab. Whitelisted sites are not intercepted at all.
 - Google search runs with SafeSearch locked on (Google's settings page says
-  someone else controls it). That is the launcher's doing, see step 5 above.
+  someone else controls it). That is the installer's doing, see step 5 above.
 - If you forget whether something was blurred, the **Detections** tab lists
   recent scans by host, label and score. No images are shown.
 - Set a **PIN** on the panel if you don't want settings changed casually.

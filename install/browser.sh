@@ -46,12 +46,12 @@ PROXY_PORT=8080
 # Google search goes around the proxy. Google answers a Chromium that reaches
 # it over TCP instead of QUIC (HTTP/3) with a CAPTCHA on every search, and an
 # HTTP proxy can't carry QUIC (a bare CONNECT tunnel gets the same CAPTCHA;
-# mitmproxy isn't the trigger). The browser connects directly and resolves
-# the host to Google's SafeSearch-locking address itself, so results are
+# mitmproxy isn't the trigger). The browser connects directly, and Chromium's
+# ForceGoogleSafeSearch policy (install_safesearch_policy) keeps its searches
 # filtered at Google's end; Image Search thumbnails still load through the
-# proxy and are censored. See docs/decisions.md.
+# proxy and are censored. A flag can't do that: --host-resolver-rules puts up
+# Chromium's "unsupported command-line flag" bar. See docs/decisions.md.
 PROXY_BYPASS=www.google.com
-RESOLVER_RULES="MAP www.google.com forcesafesearch.google.com"
 CA_PEM="$SCS_DIR/mitmproxy/mitmproxy-ca-cert.pem"
 ICON_SVG="$SCS_DIR/browser-icon.svg"
 UPDATE_UNIT=scs-update
@@ -390,6 +390,37 @@ install_chromium() {
 }
 
 # Chromium's SingletonLock is a dangling symlink (to host-pid), so -e misses it.
+# Locks SafeSearch on in Chromium (ForceGoogleSafeSearch), since Google
+# search doesn't go through the proxy. Policies are per Chromium install,
+# not per profile: on Linux the managed-policy directory (root), on macOS
+# the user's defaults for the app. Every profile of that Chromium gets it.
+policy_dir() {
+  case $CHROMIUM in
+    /snap/*) echo /var/snap/chromium/current/policies/managed ;;
+    *)       echo /etc/chromium/policies/managed ;;
+  esac
+}
+install_safesearch_policy() {
+  log "Locking SafeSearch on in Chromium"
+  if [ "$OS" = Darwin ]; then
+    defaults write org.chromium.Chromium ForceGoogleSafeSearch -bool true
+  else
+    local dir; dir=$(policy_dir)
+    sudo mkdir -p "$dir"
+    printf '{\n  "ForceGoogleSafeSearch": true\n}\n' | sudo tee "$dir/$BROWSER_ID.json" >/dev/null
+  fi
+}
+uninstall_safesearch_policy() {
+  if [ "$OS" = Darwin ]; then
+    defaults delete org.chromium.Chromium ForceGoogleSafeSearch >/dev/null 2>&1 || true
+  else
+    local f
+    for f in /var/snap/chromium/current/policies/managed/$BROWSER_ID.json /etc/chromium/policies/managed/$BROWSER_ID.json; do
+      [ -e "$f" ] && sudo rm -f "$f"
+    done
+  fi
+}
+
 profile_in_use() {
   local base; base=$(profile_dir)
   [ -L "$base/SingletonLock" ] || [ -e "$base/SingletonLock" ] || [ -S "$base/SingletonSocket" ]
@@ -452,7 +483,6 @@ exec "\$CHROMIUM" \\
   --user-data-dir="\$PROFILE" "\$FEATURES" \\
   --proxy-server="$PROXY_HOST:$PROXY_PORT" \\
   --proxy-bypass-list="$PROXY_BYPASS" \\
-  --host-resolver-rules="$RESOLVER_RULES" \\
   --class=SissyBrowser \\
   --no-first-run --no-default-browser-check \\
   "\$@"
@@ -501,7 +531,7 @@ install_launcher_linux() {
   # (unless-stopped) and init_profile has trusted the CA.
   local exec="$bin"
   case $CHROMIUM in
-    /snap/*) exec="$CHROMIUM \"--user-data-dir=$(profile_dir)\" --proxy-server=$PROXY_HOST:$PROXY_PORT --proxy-bypass-list=$PROXY_BYPASS \"--host-resolver-rules=$RESOLVER_RULES\" --class=SissyBrowser --no-first-run --no-default-browser-check" ;;
+    /snap/*) exec="$CHROMIUM \"--user-data-dir=$(profile_dir)\" --proxy-server=$PROXY_HOST:$PROXY_PORT --proxy-bypass-list=$PROXY_BYPASS --class=SissyBrowser --no-first-run --no-default-browser-check" ;;
   esac
   # The icon is given by path: a stale icon-theme.cache in ~/.local/share/icons
   # otherwise hides a freshly added icon name from GNOME.
@@ -776,6 +806,7 @@ uninstall() {
     ask "Remove Chromium too ($chromium)?" && remove_chromium=1
   fi
   uninstall_launcher
+  uninstall_safesearch_policy
   uninstall_updater
   if [ "$remove_docker" = 1 ]; then remove_docker; else remove_proxy; fi
   [ "$remove_chromium" = 0 ] || remove_chromium "$chromium"
@@ -795,6 +826,7 @@ get_proxy
 setup_gpu
 start_proxy
 install_chromium
+install_safesearch_policy
 [ -f "$ICON_SVG" ] || die "icon missing from the image: $ICON_SVG"
 if [ "$OS" = Linux ]; then install_launcher_linux; else install_launcher_macos; fi
 seed_profile
@@ -810,6 +842,7 @@ cat <<EOF
     Proxy:        $PROXY_HOST:$PROXY_PORT (Docker, restarts with the machine)
     Admin panel:  http://localhost:8082/admin
     Install:      $SCS_DIR (checks $SCS_CHANNEL for updates at each startup; $SCS_DIR/scs-update --now checks at once)
-    Only $BROWSER_NAME goes through the proxy; your other browsers are unchanged.
+    Only $BROWSER_NAME goes through the proxy; your other browsers are unchanged,
+    except that Google search runs with SafeSearch locked on in every Chromium profile.
 EOF
 [ "$GROUP_ADDED" = 0 ] || echo "    Log out and back in so you can run docker without sudo."

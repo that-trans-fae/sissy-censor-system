@@ -41,11 +41,13 @@ also starts the proxy container if Docker is up.
 Google search is the one site the launcher takes around the proxy
 (`--proxy-bypass-list=www.google.com`): Google answers a Chromium that
 reaches it over TCP instead of HTTP/3 with a CAPTCHA on every search, and
-an HTTP proxy can't carry HTTP/3. The browser resolves `www.google.com` to
-Google's SafeSearch-locking address instead (`--host-resolver-rules`), so
-results are filtered at Google's end and the setting can't be turned off
-from the page; Image Search thumbnails still load through the proxy and
-are censored.
+an HTTP proxy can't carry HTTP/3. The installer locks SafeSearch on instead,
+with Chromium's `ForceGoogleSafeSearch` policy (a file in the managed-policy
+directory on Linux, written with sudo; the app's user defaults on macOS; the
+user's registry hive on Windows), so results are filtered at Google's end
+and the setting can't be turned off from the page. The policy covers every
+profile of that Chromium, not only the Sissy Browser. Image Search
+thumbnails still load through the proxy and are censored.
 
 Linux and macOS:
 

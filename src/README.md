@@ -72,13 +72,13 @@ try it without changing system settings, use a separate test profile:
 chromium --user-data-dir=$HOME/snap/chromium/common/censor-test --proxy-server=127.0.0.1:8080
 ```
 
-The installed launcher also passes `--proxy-bypass-list=www.google.com` and
-`--host-resolver-rules="MAP www.google.com forcesafesearch.google.com"`.
-Google answers a Chromium that reaches it over TCP instead of HTTP/3 with a
-CAPTCHA on every search, and an HTTP proxy can't carry HTTP/3 (a bare CONNECT
-tunnel gets the same CAPTCHA, so this is not mitmproxy's doing), so Google
-search goes direct, resolved to Google's SafeSearch-locking address; see
-`docs/decisions.md`. Image Search thumbnails still come through the proxy.
+The installed launcher also passes `--proxy-bypass-list=www.google.com`, and
+the installer sets Chromium's `ForceGoogleSafeSearch` policy. Google answers
+a Chromium that reaches it over TCP instead of HTTP/3 with a CAPTCHA on every
+search, and an HTTP proxy can't carry HTTP/3 (a bare CONNECT tunnel gets the
+same CAPTCHA, so this is not mitmproxy's doing), so Google search goes
+direct, with SafeSearch locked by policy; see `docs/decisions.md`. Image
+Search thumbnails still come through the proxy.
 
 Chromium's component updater ignores the policy, so `update.googleapis.com`
 and `optimizationguide-pa.googleapis.com` are on the built-in

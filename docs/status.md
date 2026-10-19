@@ -15,8 +15,8 @@ Last updated Oct 19, 2026.
 - Google search around the proxy (Oct 19, 2026): Google challenges a
   Chromium that can't use HTTP/3 with a CAPTCHA on every search, and an HTTP
   proxy can't carry HTTP/3, so the launchers bypass the proxy for
-  `www.google.com` and resolve it to Google's SafeSearch-locking address;
-  see `decisions.md`
+  `www.google.com` and the installers lock SafeSearch on with Chromium's
+  `ForceGoogleSafeSearch` policy; see `decisions.md`
 - `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
   sampling and a content-hash cache
 - Female-only selection rule with context thresholds (see `decisions.md`)

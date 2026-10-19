@@ -49,10 +49,11 @@ $ProxyHost = '127.0.0.1'
 $ProxyPort = 8080
 # Google search goes around the proxy. Google answers a Chromium that reaches
 # it over TCP instead of QUIC (HTTP/3) with a CAPTCHA on every search, and an
-# HTTP proxy can't carry QUIC. The browser connects directly and resolves the
-# host to Google's SafeSearch-locking address itself (docs/decisions.md).
+# HTTP proxy can't carry QUIC. The browser connects directly, and the
+# ForceGoogleSafeSearch policy (Install-SafeSearchPolicy) keeps its searches
+# filtered at Google's end (docs/decisions.md).
 $ProxyBypass = 'www.google.com'
-$ResolverRules = 'MAP www.google.com forcesafesearch.google.com'
+$PolicyKey = 'HKCU:\Software\Policies\Chromium'
 $CaPem = Join-Path $ScsDir 'mitmproxy\mitmproxy-ca-cert.pem'
 $UpdateTask = 'Sissy Censor System update'
 $DockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
@@ -460,13 +461,26 @@ function Install-Shortcuts($chromium) {
         $lnk = $shell.CreateShortcut($path)
         $lnk.TargetPath = $chromium
         $lnk.Arguments = "--user-data-dir=`"$ProfileDir`" --proxy-server=$ProxyHost`:$ProxyPort " +
-                         "--proxy-bypass-list=$ProxyBypass `"--host-resolver-rules=$ResolverRules`" " +
+                         "--proxy-bypass-list=$ProxyBypass " +
                          "--no-first-run --no-default-browser-check $ChromiumFeatures"
         $lnk.WorkingDirectory = Split-Path $chromium
         $lnk.IconLocation = "$IconPath,0"
         $lnk.Description = 'Chromium through the Sissy Censor System proxy'
         $lnk.Save()
     }
+}
+
+# Locks SafeSearch on in Chromium (ForceGoogleSafeSearch), since Google
+# search doesn't go through the proxy. Policies are per Chromium install, not
+# per profile; the user's hive needs no elevation and every profile of that
+# Chromium gets it.
+function Install-SafeSearchPolicy {
+    Log 'Locking SafeSearch on in Chromium'
+    New-Item -Path $PolicyKey -Force | Out-Null
+    New-ItemProperty -Path $PolicyKey -Name ForceGoogleSafeSearch -Value 1 -PropertyType DWord -Force | Out-Null
+}
+function Uninstall-SafeSearchPolicy {
+    Remove-ItemProperty -Path $PolicyKey -Name ForceGoogleSafeSearch -ErrorAction SilentlyContinue
 }
 
 # Seeds the profile so the bookmark bar is shown with the admin panel on it.
@@ -662,6 +676,7 @@ function Uninstall {
         $removeWsl = Ask "$q?"
     }
     Uninstall-Shortcuts
+    Uninstall-SafeSearchPolicy
     Uninstall-Updater
     if ($removeDocker) { Remove-DockerDesktop } else { Remove-Proxy }
     if ($removeChromium) { Remove-Chromium $chromium }
@@ -682,6 +697,7 @@ try {
     Start-Proxy
     $chromium = Install-Chromium
     Install-Shortcuts $chromium
+    Install-SafeSearchPolicy
     Seed-Profile
     Trust-CaInProfile $chromium
     Install-Updater
@@ -693,7 +709,8 @@ try {
     Proxy:        $ProxyHost`:$ProxyPort (Docker, starts with Windows)
     Admin panel:  http://localhost:8082/admin
     Install:      $ScsDir (checks $ScsChannel for updates at each sign-in)
-    Only $BrowserName goes through the proxy; your other browsers are unchanged.
+    Only $BrowserName goes through the proxy; your other browsers are unchanged,
+    except that Google search runs with SafeSearch locked on in every Chromium profile.
     The CA is trusted inside the profile: rerun this installer if you ever
     delete $ScsDir\mitmproxy and the proxy makes a new CA.
 "@
