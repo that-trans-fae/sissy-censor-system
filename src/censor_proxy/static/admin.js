@@ -226,6 +226,7 @@
       ["Cached results", fmtInt(s.cache_entries)],
     ]));
     $("info-proxy").replaceChildren(...dl([
+      ["Version", s.version || "dev"],
       ["Uptime", fmtDuration(s.uptime_seconds)],
       ["Whitelist", [...s.whitelist, "the built-in list"].join(", ")],
       ["Detection log", h("span", {}, s.log_level, s.log_path ? [" → ", h("code", { text: s.log_path })] : null)],

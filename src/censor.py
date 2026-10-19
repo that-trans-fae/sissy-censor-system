@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 from mitmproxy import ctx, http
 
-from censor_proxy import datauri, inject
+from censor_proxy import datauri, inject, updates
 from censor_proxy.admin import AdminServer, UserConfigFile
 from censor_proxy.config import Config, config_path, load_config
 from censor_proxy.detection_log import DetectionLog
@@ -70,8 +70,8 @@ class CensorAddon:
         if self.cfg.admin.enabled:
             self.admin = AdminServer(self.cfg, self, UserConfigFile(config_path()))
             self.admin.start()
-        log.info("censor proxy ready: model=%s style=%s resources=%s (%d workers, %d threads)",
-                 self.cfg.model.path or "320n (bundled)", self.cfg.censor.style,
+        log.info("censor proxy ready: version=%s model=%s style=%s resources=%s (%d workers, %d threads)",
+                 updates.version(), self.cfg.model.path or "320n (bundled)", self.cfg.censor.style,
                  self.cfg.model.resources, self.cfg.model.workers, self.cfg.model.threads_per_worker)
 
     def done(self):
