@@ -63,18 +63,6 @@
       <div class="card"><h2>Detection</h2><dl id="info-detection"></dl></div>
       <div class="card"><h2>Proxy</h2><dl id="info-proxy"></dl></div>
     </div>
-    <div class="card">
-      <h2>Updates</h2>
-      <dl id="info-updates"></dl>
-      <label class="check">
-        <input type="checkbox" id="upd-enabled">
-        <span>Install new releases automatically. Each time this computer starts, a job on it
-          checks Docker Hub once, and switches the proxy to a new release once the Sissy
-          Browser is closed (going back if the new one doesn't start). It is the only thing
-          that contacts the internet on its own.</span>
-      </label>
-      <p class="error" id="upd-error" role="alert"></p>
-    </div>
   </section>
 
   <section id="whitelist" class="tab" hidden>
@@ -150,6 +138,18 @@
   <section id="settings" class="tab" hidden>
     <p class="error card" id="cfg-error" role="alert"></p>
     <div class="card">
+      <h2>Updates</h2>
+      <dl id="info-updates"></dl>
+      <label class="check">
+        <input type="checkbox" id="upd-enabled">
+        <span>Install new releases automatically. Each time this computer starts, a job on it
+          checks Docker Hub once, and switches the proxy to a new release once the Sissy
+          Browser is closed (going back if the new one doesn't start). It is the only thing
+          that contacts the internet on its own.</span>
+      </label>
+      <p class="error" id="upd-error" role="alert"></p>
+    </div>
+    <div class="card">
       <h2>Image model</h2>
       <div class="levels" id="speeds" role="radiogroup" aria-label="Image model"></div>
     </div>
@@ -161,6 +161,15 @@
     <div class="card">
       <h2>Censoring level</h2>
       <div class="levels" id="levels" role="radiogroup" aria-label="Censoring level"></div>
+    </div>
+    <div class="card">
+      <h2>Video</h2>
+      <label class="check">
+        <input type="checkbox" id="vid-muted">
+        <span>Start censored videos muted. The video's controls unmute it. Off, the censored
+          copy takes the muted state of the page's own video.</span>
+      </label>
+      <p class="error" id="vid-error" role="alert"></p>
     </div>
     <div id="cfg-sections"></div>
     <div class="card" id="cfg-file" hidden>

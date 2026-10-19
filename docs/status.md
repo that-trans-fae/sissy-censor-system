@@ -101,7 +101,8 @@ Last updated Oct 19, 2026.
   build), and a host job (`scs-update`) checks once at each startup and
   installs a new release once the Sissy Browser is closed, keeps them once the image's health check
   passes, and rolls back and skips them otherwise. The result and an on/off
-  switch are on the panel's Overview; `tools/release.sh` publishes amd64
+  switch are the top block of the panel's Settings tab (with a switch for
+  `video.start_muted` further down); `tools/release.sh` publishes amd64
   and arm64. Verified on Linux against a local registry with three
   releases (pending while the browser ran, applied after, a broken release
   rolled back and skipped, the panel switch) and with pytest against a

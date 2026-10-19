@@ -175,16 +175,17 @@ Open either:
 Tabs:
 
 - **Overview**: counts since start (censored, clean, whitelisted, failed
-  closed...), the model and the log level, and **Updates**: the running
-  version, the last update check, and the switch for automatic updates
-  (`updates.enabled`; see [Releases and updates](#releases-and-updates)).
+  closed...), the model and the log level.
 - **Whitelist**: the [whitelist](#whitelist). Add or remove your domains;
   the built-in list is shown read-only below them. The checkbox is
   `whitelist.match_referer`.
 - **Detections**: the latest entries of the detection log, filterable. No
   images, just hosts, labels and scores.
 - **Video**: video jobs with their progress, and a button to cancel them.
-- **Settings**: three switches, plus every option in Custom mode.
+- **Settings**: the blocks below, plus every option in Custom mode.
+  - **Updates**: the running version, the last update check, and the
+    switch for automatic updates (`updates.enabled`; see
+    [Releases and updates](#releases-and-updates)).
   - **Image model**: Fast (320n) or Slow (640m), one choice per entry in
     `model.available` (its `label`). The video model has its own dropdown,
     because 640m can't keep up with video.
@@ -204,6 +205,8 @@ Tabs:
       `docs/decisions.md` tunes.
     - **Permissive**: only vaginas are censored.
     - **Custom**.
+  - **Video**: whether censored videos start muted (`video.start_muted`,
+    on by default); the video's controls unmute it.
 
   Custom shows every option in `defaults.yaml` with its comment, starting
   from the level you had; the other levels hide them and fix the detection
