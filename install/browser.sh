@@ -23,8 +23,7 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------- settings
-# TODO: replace the placeholder with the Docker Hub repository.
-SCS_IMAGE_REPO="${SCS_IMAGE_REPO:-OWNER/scs}"
+SCS_IMAGE_REPO="${SCS_IMAGE_REPO:-thattransfae/scs}"
 # The tag installs follow; scs-update moves to whatever it points at.
 SCS_CHANNEL="${SCS_CHANNEL:-$SCS_IMAGE_REPO:latest}"
 SCS_DIR="${SCS_DIR:-$HOME/scs}"
@@ -186,7 +185,6 @@ migrate_checkout() {
 }
 
 get_proxy() {
-  case "$SCS_CHANNEL" in OWNER/*) die "SCS_IMAGE_REPO is still the placeholder; set it to the Docker Hub repository" ;; esac
   log "Downloading $SCS_CHANNEL (over a gigabyte the first time)"
   "${DOCKER[@]}" pull "$SCS_CHANNEL"
   local repo=${SCS_CHANNEL%:*} image

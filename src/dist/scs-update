@@ -7,7 +7,7 @@
 #   1. reads updates.* from config/config.yaml, through the container
 #      (censor_proxy/updates.py); updates.enabled false stops here
 #   2. at most every updates.check_hours, pulls SCS_CHANNEL from .env
-#      (the Docker Hub tag followed, such as OWNER/scs:latest)
+#      (the Docker Hub tag followed, such as thattransfae/scs:latest)
 #   3. if that is a new image, and the Sissy Browser is closed (or
 #      updates.wait_for_browser is false), puts the image's compose.yaml in
 #      place, pins SCS_IMAGE in .env to the new digest and recreates the

@@ -24,8 +24,7 @@ Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE.
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------- settings
-# TODO: replace the placeholder with the Docker Hub repository.
-$ScsImageRepo = if ($env:SCS_IMAGE_REPO) { $env:SCS_IMAGE_REPO } else { 'OWNER/scs' }
+$ScsImageRepo = if ($env:SCS_IMAGE_REPO) { $env:SCS_IMAGE_REPO } else { 'thattransfae/scs' }
 # The tag installs follow; scs-update.ps1 moves to whatever it points at.
 $ScsChannel   = if ($env:SCS_CHANNEL) { $env:SCS_CHANNEL } else { "$ScsImageRepo`:latest" }
 $ScsDir       = if ($env:SCS_DIR) { $env:SCS_DIR } else { Join-Path $env:USERPROFILE 'scs' }
@@ -128,7 +127,6 @@ function Move-OldCheckout {
 }
 
 function Get-Proxy {
-    if ($ScsChannel -like 'OWNER/*') { Die 'SCS_IMAGE_REPO is still the placeholder; set it to the Docker Hub repository' }
     Log "Downloading $ScsChannel (over a gigabyte the first time)"
     docker pull $ScsChannel
     if ($LASTEXITCODE -ne 0) { Die "docker pull $ScsChannel failed" }

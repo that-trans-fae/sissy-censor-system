@@ -105,8 +105,8 @@ Last updated Oct 19, 2026.
   and arm64. Verified on Linux against a local registry with three
   releases (pending while the browser ran, applied after, a broken release
   rolled back and skipped, the panel switch) and with pytest against a
-  fake docker. Not yet: a real Docker Hub push (the repository is still the
-  `OWNER/scs` placeholder) or an arm64 build; the systemd timer, launchd
+  fake docker. Not yet: a real push to Docker Hub (`thattransfae/scs`) or
+  an arm64 build; the systemd timer, launchd
   agent and Windows task are written but untried, and the PowerShell
   updater is parse-checked only
 

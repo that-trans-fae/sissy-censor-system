@@ -9,10 +9,9 @@ your other browsers are untouched. No source code is downloaded: everything
 the install needs comes out of the image.
 
 Replace `OWNER` in the URLs below with the GitHub account that hosts the
-installers. The scripts carry a Docker Hub placeholder too,
-`SCS_IMAGE_REPO` (marked `TODO` near the top, as in
-`src/tools/release.sh`); set it there before publishing, or pass the real
-repository in the environment when running.
+installers. The image comes from
+[`thattransfae/scs`](https://hub.docker.com/r/thattransfae/scs) on Docker
+Hub (`SCS_IMAGE_REPO` points elsewhere).
 
 | Script | Platform |
 | --- | --- |
@@ -83,7 +82,7 @@ update" on Windows. Each run of `scs-update`:
 1. reads `updates.*` from your settings. With automatic updates off (the
    switch on the admin panel's Overview) it stops here.
 2. at most once a day (`updates.check_hours`), pulls `SCS_CHANNEL`
-   (`OWNER/scs:latest`) from Docker Hub. This is the only thing the install
+   (`thattransfae/scs:latest`) from Docker Hub. This is the only thing the install
    sends to the internet on its own.
 3. if that is a new release and the Sissy Browser is closed
    (`updates.wait_for_browser`), switches the proxy to it: the new
@@ -106,7 +105,7 @@ powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\scs\scs-update.ps1 -No
 ```
 
 To stay on a release, set `SCS_CHANNEL` in `.env` to a version tag such as
-`OWNER/scs:1.2.0`, or turn automatic updates off on the panel.
+`thattransfae/scs:1.2.0`, or turn automatic updates off on the panel.
 
 ## Options and undo
 
@@ -114,7 +113,7 @@ Both scripts read these environment variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SCS_IMAGE_REPO` | placeholder | Docker Hub repository |
+| `SCS_IMAGE_REPO` | `thattransfae/scs` | Docker Hub repository |
 | `SCS_CHANNEL` | `$SCS_IMAGE_REPO:latest` | Tag to install and follow |
 | `SCS_DIR` | `~/scs` (`%USERPROFILE%\scs`) | Where the proxy runs from |
 | `SCS_UNINSTALL` | unset | `1` removes the launcher, its profile and the update job |

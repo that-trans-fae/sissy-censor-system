@@ -12,15 +12,13 @@
 # platforms. The git tag v<VERSION> is created once the push succeeds.
 set -euo pipefail
 
-# TODO: replace the placeholder with the Docker Hub repository.
-REPO="${SCS_IMAGE_REPO:-OWNER/scs}"
+REPO="${SCS_IMAGE_REPO:-thattransfae/scs}"
 PLATFORMS="${SCS_PLATFORMS:-linux/amd64,linux/arm64}"
 VERSION="${1:-}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: tools/release.sh MAJOR.MINOR.PATCH"
-case "$REPO" in OWNER/*) die "set SCS_IMAGE_REPO (or the default in this script) to the Docker Hub repository" ;; esac
 cd "$(dirname "$0")/.."
 [ -z "$(git status --porcelain)" ] || die "the checkout has uncommitted changes; commit them first"
 ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null || die "v$VERSION is already tagged"

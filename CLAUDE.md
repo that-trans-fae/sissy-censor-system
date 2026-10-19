@@ -122,7 +122,7 @@ its video hooks on `video.enabled`. The pieces are filled into the script by
 ## Releases and updates
 
 Users get the image from Docker Hub, never the source: the installers pull
-`SCS_CHANNEL` (`OWNER/scs:latest`), copy `/app/dist` out of it into `~/scs`
+`SCS_CHANNEL` (`thattransfae/scs:latest`), copy `/app/dist` out of it into `~/scs`
 and run it from there with `.env` pinning `SCS_IMAGE` to a digest.
 `tools/release.sh VERSION` publishes; pushing `latest` is releasing. An
 hourly host job (systemd user timer, launchd agent or scheduled task) runs
