@@ -97,7 +97,34 @@ brew_bin() {
   fi
 }
 
-# Runs a brew cask command (install, reinstall), updating Homebrew first
+# The Command Line Tools (or Xcode), checked by path: running xcrun or git
+# without them opens Apple's install window.
+have_clt() {
+  local dev; dev=$(xcode-select -p 2>/dev/null) && [ -x "$dev/usr/bin/git" ]
+}
+
+# Homebrew needs the Command Line Tools: their git to update itself and
+# swift to install casks. A macOS upgrade can leave them missing, and
+# Homebrew then silently stops updating and falls behind the running macOS.
+# Homebrew's installer, run again over an existing install, installs the
+# tools without a window (softwareupdate) and brings Homebrew up to date.
+# Non-interactive, it only uses sudo that is already unlocked, so sudo is
+# unlocked first and kept so while it runs (the tools take minutes).
+ensure_brew() {
+  if [ -n "$(brew_bin)" ] && have_clt; then return; fi
+  if [ -n "$(brew_bin)" ]; then log "Repairing Homebrew (installing the Command Line Tools)"
+  else log "Installing Homebrew"
+  fi
+  sudo -v
+  while kill -0 $$ 2>/dev/null && sleep 50; do sudo -n true 2>/dev/null || exit; done &
+  local keep=$!
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+  kill "$keep" 2>/dev/null || true
+  [ -n "$(brew_bin)" ] || die "Homebrew did not install; see its output above"
+  have_clt || die "the Command Line Tools did not install; run 'xcode-select --install', then run this again"
+}
+
+# Runs a brew cask command (install), updating Homebrew first
 # (once). An old Homebrew can't read the current cask definitions
 # ("Unexpected method ... called on Cask") and exits non-zero even when the
 # app got installed, so callers check the app rather than the exit status.
@@ -133,8 +160,9 @@ install_cask_app() {
     log "Installing $name"
     brew_cask install "$cask" || true
   elif ! app_runs_here "$app"; then
+    # --force replaces the app even where Homebrew lost track of it.
     log "$name is the Apple silicon build; reinstalling the Intel one"
-    brew_cask reinstall "$cask" || true
+    brew_cask install "$cask" --force || true
   else
     return 0
   fi
@@ -180,10 +208,7 @@ install_docker_linux() {
 }
 
 install_docker_desktop_macos() {
-  if [ -z "$(brew_bin)" ]; then
-    log "Installing Homebrew"
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  fi
+  ensure_brew
   install_cask_app docker-desktop /Applications/Docker.app "Docker Desktop"
   setup_docker_desktop_macos
 }
