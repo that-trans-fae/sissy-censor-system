@@ -198,7 +198,7 @@ is, and the Sissy Browser is closed, it switches to the new image, waits
 for its health check to pass, and rolls back to the old one if it does
 not. The result shows on the admin panel's Overview tab. You can turn
 automatic updates off there, or pin a version by setting the channel in
-`.env` to a tag such as `OWNER/scs:1.2.0`.
+`.env` to a tag such as `thattransfae/scs:1.2.0`.
 
 **4. Chromium.** The snap or distribution package on Linux, the Homebrew
 cask on macOS, the winget package on Windows (plus the sqlite3 tool, which
@@ -354,8 +354,9 @@ Video censoring works end to end, including seeking, and plays on real
 sites, but still has rough edges. The dedicated-browser installer is
 verified on Ubuntu; the macOS and Windows scripts are written and
 syntax-checked but not yet run on those systems. Automatic updates are
-verified against a local registry; the real Docker Hub repository is still
-the `OWNER/scs` placeholder.
+verified against a local registry; nothing has been pushed to the Docker
+Hub repository ([`thattransfae/scs`](https://hub.docker.com/r/thattransfae/scs))
+yet.
 
 Not yet: a system-wide proxy mode, Firefox support, and tuning the
 detection thresholds against more real browsing. The full list, with
