@@ -46,7 +46,11 @@ $CaPem = Join-Path $ScsDir 'mitmproxy\mitmproxy-ca-cert.pem'
 $UpdateTask = 'Sissy Censor System update'
 $DockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
 $ChromiumWingetId = 'Hibbiki.Chromium'
-$ChromiumMinVersion = 134   # the profile certificate store (ServerCertificate)
+# The profile certificate store (ServerCertificate) exists from Chromium
+# 134; 134-136 only create it with this feature on (it is on by default from
+# 137, and later builds ignore the name), so it goes on every start.
+$ChromiumMinVersion = 134
+$ChromiumFeatures = '--enable-features=EnableCertManagementUIV2Write'
 $BrowserHome = Join-Path $env:LOCALAPPDATA 'SissyBrowser'
 $ProfileDir = Join-Path $BrowserHome 'profile'
 $IconPath = Join-Path $BrowserHome 'sissy-browser.ico'
@@ -318,9 +322,9 @@ function Trust-CaInProfile($chromium) {
         if (Test-ProfileInUse) { Warn "$BrowserName is running; close it and rerun to trust the proxy CA"; return }
         Log 'Initialising the profile'
         Start-Process -Wait -WindowStyle Hidden -FilePath $chromium -ArgumentList @(
-            "--user-data-dir=`"$ProfileDir`"", '--headless=new', '--disable-gpu', '--no-first-run', '--dump-dom', 'about:blank')
+            "--user-data-dir=`"$ProfileDir`"", $ChromiumFeatures, '--headless=new', '--disable-gpu', '--no-first-run', '--dump-dom', 'about:blank')
     }
-    if (-not (Test-Path $db)) { Die "Chromium $(Chromium-Version $chromium) at $chromium did not create $db" }
+    if (-not (Test-Path $db)) { Die "Chromium $(Chromium-Version $chromium) at $chromium did not create $db ($ChromiumMinVersion or newer is needed)" }
     Log "Trusting the proxy CA in the $BrowserName profile"
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CaPem)
     $der = $cert.RawData
@@ -391,7 +395,7 @@ function Install-Shortcuts($chromium) {
         $lnk = $shell.CreateShortcut($path)
         $lnk.TargetPath = $chromium
         $lnk.Arguments = "--user-data-dir=`"$ProfileDir`" --proxy-server=$ProxyHost`:$ProxyPort " +
-                         "--no-first-run --no-default-browser-check"
+                         "--no-first-run --no-default-browser-check $ChromiumFeatures"
         $lnk.WorkingDirectory = Split-Path $chromium
         $lnk.IconLocation = "$IconPath,0"
         $lnk.Description = 'Chromium through the Sissy Censor System proxy'

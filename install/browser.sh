@@ -411,8 +411,11 @@ if command -v timeout >/dev/null 2>&1; then t="timeout 30"; else t=""; fi
 
 # Trust the proxy CA in this profile's certificate store. Chromium creates
 # the store on first start, so a new profile is initialised headless first.
+# Chromium 134-136 only keep the store with this feature on (on by default
+# from 137; later builds ignore the name), so it goes on every start.
+FEATURES=--enable-features=EnableCertManagementUIV2Write
 if [ ! -s "\$DB" ]; then
-  "\$CHROMIUM" --user-data-dir="\$PROFILE" --headless=new --disable-gpu --no-first-run --dump-dom about:blank >/dev/null 2>&1
+  "\$CHROMIUM" --user-data-dir="\$PROFILE" "\$FEATURES" --headless=new --disable-gpu --no-first-run --dump-dom about:blank >/dev/null 2>&1
 fi
 if [ -s "\$DB" ] && [ -s "\$CA" ]; then
   python3 - "\$DB" "\$CA" <<'PY' 2>/dev/null
@@ -429,7 +432,7 @@ PY
 fi
 
 exec "\$CHROMIUM" \\
-  --user-data-dir="\$PROFILE" \\
+  --user-data-dir="\$PROFILE" "\$FEATURES" \\
   --proxy-server="$PROXY_HOST:$PROXY_PORT" \\
   --class=SissyBrowser \\
   --no-first-run --no-default-browser-check \\
