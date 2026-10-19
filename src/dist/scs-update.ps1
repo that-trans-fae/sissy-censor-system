@@ -3,7 +3,8 @@ Sissy Censor System updater for Windows (Linux and macOS: scs-update).
 
 Lives in the install folder (%USERPROFILE%\scs) and runs once each time you
 sign in, from the scheduled task the installer adds. The run does what
-scs-update does: waits for Docker Desktop and the proxy, reads updates.*
+scs-update does: starts Docker Desktop if it isn't running (it only starts at
+sign-in on its own when set to), waits for it and the proxy, reads updates.*
 through the container, pulls SCS_CHANNEL (retrying while the network comes
 up), and once the Sissy Browser is closed recreates the container on a new
 release, keeping it only once it reports healthy. The result goes to
@@ -223,8 +224,15 @@ function Check {
 $lock = Join-Path $Dir '.update.lock'
 try { $lockStream = [System.IO.File]::Open($lock, 'OpenOrCreate', 'Write', 'None') } catch { exit 0 }
 try {
-    # Docker Desktop starts at sign-in too, and then restarts the proxy. A
-    # proxy still stopped after two minutes was stopped by you, and is left alone.
+    # Docker Desktop only starts at sign-in when set to, and the proxy can't
+    # run without it.
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0 -and -not (Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue)) {
+        $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+        if (Test-Path $exe) { Start-Process $exe } else { Log "Docker Desktop isn't at $exe" }
+    }
+    # Docker Desktop then restarts the proxy. A proxy still stopped after two
+    # minutes was stopped by you, and is left alone.
     $waited = 0
     while ($true) {
         docker info *> $null

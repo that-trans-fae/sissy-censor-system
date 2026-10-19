@@ -135,8 +135,9 @@ Users get the image from Docker Hub, never the source: the installers pull
 and run it from there with `.env` pinning `SCS_IMAGE` to a digest.
 `tools/release.sh VERSION` publishes; pushing `latest` is releasing. A
 host job (systemd user timer, launchd agent or scheduled task) runs
-`scs-update` once per login after startup: it waits for Docker and the
-proxy, pulls the channel once (retrying while the network comes up),
+`scs-update` once per login after startup: it starts Docker Desktop
+(macOS, Windows), which otherwise only starts at login when set to, waits
+for Docker and the proxy, pulls the channel once (retrying while the network comes up),
 waits for the Sissy Browser to close, recreates the container on a new
 digest, waits for the image's `HEALTHCHECK`, and otherwise restores the
 old compose.yaml and digest and skips that release. It writes

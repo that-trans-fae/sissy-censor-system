@@ -250,8 +250,9 @@ function Start-Proxy {
     }
 }
 
-# One scs-update.ps1 run each time you sign in, as a task of this user, a
-# minute after sign-in. conhost --headless keeps a console window from
+# One scs-update.ps1 run each time you sign in, as a task of this user, at
+# sign-in: it also starts Docker Desktop, which doesn't start on its own
+# unless set to, so no delay. conhost --headless keeps a console window from
 # showing. The run may last while it waits for the browser to close, so it
 # has no time limit.
 function Install-Updater {
@@ -260,7 +261,6 @@ function Install-Updater {
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`""
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-    $trigger.Delay = 'PT1M'
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName $UpdateTask -Action $action -Trigger $trigger -Settings $settings `

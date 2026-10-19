@@ -580,10 +580,28 @@ CHROMIUM="$CHROMIUM"
 CA="\$SCS_DIR/mitmproxy/mitmproxy-ca-cert.pem"
 DB="\$PROFILE/Default/ServerCertificate"
 
-# Start the proxy if Docker is up and it is not running yet.
+# Start the proxy if it isn't answering, and wait up to two minutes for it,
+# so the first pages don't fail on a proxy that is still starting. On macOS
+# that may mean starting Docker Desktop first (the update agent starts it at
+# login, but the browser may be quicker); an app bundle gets a bare PATH.
 $( [ "$OS" = Linux ] && echo 'export DOCKER_HOST=unix:///var/run/docker.sock' )
+PATH="\$PATH:/usr/local/bin:/opt/homebrew/bin:\$HOME/.docker/bin"
+DESKTOP=$( [ "$OS" = Darwin ] && echo 1 || echo 0 )
 if command -v timeout >/dev/null 2>&1; then t="timeout 30"; else t=""; fi
-(cd "\$SCS_DIR" && \$t docker compose up -d >/dev/null 2>&1) || true
+proxy_up() { curl -fsS --max-time 2 -x "http://$PROXY_HOST:$PROXY_PORT" http://censor.local/health >/dev/null 2>&1; }
+if ! proxy_up; then
+  if [ "\$DESKTOP" = 1 ] && ! docker info >/dev/null 2>&1; then open -g /Applications/Docker.app 2>/dev/null; fi
+  started=0 waited=0
+  until proxy_up || [ "\$waited" -ge 120 ]; do
+    if docker info >/dev/null 2>&1; then
+      [ "\$started" = 1 ] || (cd "\$SCS_DIR" && \$t docker compose up -d >/dev/null 2>&1)
+      started=1
+    elif [ "\$DESKTOP" = 0 ]; then
+      break  # Docker Engine is down or out of reach: waiting won't help
+    fi
+    sleep 2; waited=\$((waited + 2))
+  done
+fi
 
 # Trust the proxy CA in this profile's certificate store. Chromium creates
 # the store on first start, so a new profile is initialised headless first.

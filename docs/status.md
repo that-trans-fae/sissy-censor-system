@@ -17,6 +17,13 @@ Last updated Oct 19, 2026.
   proxy can't carry HTTP/3, so the launchers bypass the proxy for
   `www.google.com` and the installers lock SafeSearch on with Chromium's
   `ForceGoogleSafeSearch` policy; see `decisions.md`
+- Proxy after a reboot (Oct 19, 2026): the login job (`scs-update`) starts
+  Docker Desktop on macOS and Windows, which nothing did before, so the proxy
+  comes back after a restart; the macOS/Linux launcher waits for the proxy
+  before starting Chromium. Untested on a real macOS or Windows reboot yet.
+  Existing installs get the login change with the next update (applied once
+  Docker Desktop has been started by hand once) and the launcher change and
+  the Windows task's lost one-minute delay only by rerunning the installer.
 - Windows taskbar identity (Oct 19, 2026): the shortcuts and any existing
   taskbar pin carry the AppUserModelID Chromium stamps on the profile's
   windows, built with Chromium's 64-character truncation, so the Sissy

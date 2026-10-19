@@ -5,8 +5,9 @@
 # after the computer starts, from the systemd user timer or launchd agent
 # the installer adds. The run:
 #
-#   1. waits for Docker and the proxy container to come up (Docker Desktop
-#      starts at login too)
+#   1. starts Docker Desktop on macOS if it isn't running (it doesn't start
+#      at login on its own unless set to), then waits for Docker and the
+#      proxy container, which Docker restarts, to come up
 #   2. reads updates.* from config/config.yaml, through the container
 #      (censor_proxy/updates.py); updates.enabled false stops here
 #   3. pulls SCS_CHANNEL from .env (the Docker Hub tag followed, such as
@@ -280,8 +281,13 @@ main() {
   trap 'rm -rf "$DIR/.update.lock" "$DIR"/.stage.* "$DIR"/.kv.*' EXIT
   mkdir -p logs
 
-  # Docker (Docker Desktop starts at login too) and the proxy, which Docker
-  # restarts shortly after it is up. A proxy still stopped after two
+  # Docker Desktop only starts at login when set to, and the proxy can't run
+  # without it. (Linux uses Docker Engine, a system service.)
+  if [ "$(uname -s)" = Darwin ] && ! docker info >/dev/null 2>&1; then
+    open -g /Applications/Docker.app 2>/dev/null || log "couldn't start Docker Desktop"
+  fi
+
+  # Docker and the proxy, which Docker restarts shortly after it is up. A proxy still stopped after two
   # minutes was stopped by you, and is left alone.
   local waited=0 st
   until docker info >/dev/null 2>&1 && st=$(proxy_state) \
