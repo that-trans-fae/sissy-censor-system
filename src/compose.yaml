@@ -9,9 +9,31 @@ services:
       # Admin panel: http://localhost:8082/admin (also https://scs.local/admin
       # through the proxy).
       - "127.0.0.1:8082:8082"
+    # Unprivileged: the uid:gid the service runs as. Match `id -u`:`id -g` on
+    # the host, so it can write ./mitmproxy, ./config and ./logs.
+    user: "1000:1000"
+    environment:
+      HOME: /tmp
     volumes:
       # Keeps the CA stable across rebuilds, so trust is installed once.
-      - ./mitmproxy:/root/.mitmproxy
+      # mitmproxy writes here only on first start; once the CA exists you
+      # can append :ro so a compromised container can't replace it.
+      - ./mitmproxy:/mitmproxy
       # Writable: the admin panel saves settings to config/config.yaml.
       - ./config:/config
       - ./logs:/logs
+      # Scratch and the censored-video cache (video.cache_dir): memory-backed,
+      # sized for video.cache_max_bytes plus work in progress.
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 3221225472
+    # A compromised proxy is a compromise of every page in the browser, so
+    # the container gets the least it can run with: an unprivileged user, a
+    # read-only root (the mounts above are the only writable paths), no
+    # capabilities, and no privilege gain through setuid binaries.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

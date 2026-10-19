@@ -45,6 +45,13 @@ Last updated Oct 18, 2026.
   global or script tag left in the page, Referer from the `Origin` header,
   a queue cap and per-origin rate limit on job starts, and an ffmpeg
   protocol whitelist. Tested with pytest only, not yet in a browser
+- Injection only before the page's first `<body>`/`<script>`, no body
+  opt-out marker, the admin panel's Video tab explains the injection
+  trade-off, and the compose service runs read-only with no capabilities
+  (Oct 19, 2026); the hardened container was started and exercised with
+  curl. Then: random per-origin job ids, the debug beacon gated on origin,
+  and the service running as an unprivileged user with the confdir at
+  `/mitmproxy` (needs `docker compose up -d --build`)
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, whitelist (built-in hosts, YouTube
   included, plus your own domains), censoring levels (strict, lax, custom; any number of
@@ -83,9 +90,6 @@ Last updated Oct 18, 2026.
   and replayed with `tools/replay_attribution.py` before it is turned on.
   Not yet tried in the live proxy
 
-- **Security warning**: tell the user that video injection extends every
-  page's CSP and lets pages ask the proxy to fetch public video URLs (now
-  rate-limited and capped; see `docs/decisions.md`, "Page-facing surface")
 
 ## Later phases (from the handoff)
 

@@ -10,11 +10,11 @@ stays covered (the same idea as GIF frame sampling).
 
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import logging
 import re
+import secrets
 import socket
 import subprocess
 import tempfile
@@ -127,10 +127,6 @@ class Job:
             self.changed.notify_all()
 
 
-def job_id(src: str) -> str:
-    return hashlib.sha256(src.encode()).hexdigest()[:24]
-
-
 _OUTPUT_NAME = re.compile(r"[0-9a-f]{24}-\d+\.mp4")
 
 
@@ -151,6 +147,11 @@ class VideoJobs:
         self._attribution_detector: Detector | None = None
         self._detector_lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
+        # (origin, src) -> job id. Ids are random, not derived from the
+        # source: a page that knows a video URL could otherwise poll the
+        # status of a job another site started and learn what was watched.
+        # One job per origin for the same reason (a cache hit would tell).
+        self._ids: dict[tuple[str, str], str] = {}
         self._lock = threading.Lock()
         self._slots = threading.Semaphore(vcfg.max_concurrent_jobs)
         self._attempts = 0
@@ -211,10 +212,10 @@ class VideoJobs:
         page's Origin header; it becomes the Referer and keys the rate limit."""
         v = self.cfg.video
         check_source(src, allow_private=v.allow_private_sources)
-        id_ = job_id(src)
+        key = (origin or "", src)
         with self._lock:
             self._count_start(origin or "")
-            job = self._jobs.get(id_)
+            job = self._jobs.get(self._ids.get(key, ""))
             if job and job.state != "error" and not job.cancel_reason:
                 job.touch(active=True)
                 return job
@@ -223,6 +224,7 @@ class VideoJobs:
                 raise JobRefused(f"{queued} videos are already waiting; try again later")
             # Own file per attempt: a cancelled run may still be shutting down.
             self._attempts += 1
+            id_ = self._ids[key] = secrets.token_hex(12)
             job = Job(id_, src, origin + "/" if origin else None, user_agent, page=page,
                       path=self.dir / f"{id_}-{self._attempts}.mp4")
             self._jobs[id_] = job

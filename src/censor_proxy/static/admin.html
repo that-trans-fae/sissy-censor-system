@@ -121,6 +121,10 @@
     <div class="card">
       <h2>Video jobs</h2>
       <p class="muted small">Jobs since the proxy started, newest first. Refreshes every few seconds.</p>
+      <p class="muted small">The video control is a script injected into every page not on the
+        whitelist, which means each page's Content-Security-Policy is extended to allow it and any
+        page can ask the proxy to fetch a public video URL (capped and rate-limited; private
+        addresses are refused). Narrow <code>video.hosts</code> in Settings to limit this.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>State</th><th>Progress</th><th class="num">Censored frames</th><th>Source</th><th>Started</th><th></th></tr></thead>
