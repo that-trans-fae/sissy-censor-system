@@ -114,8 +114,10 @@ Last updated Oct 19, 2026.
   command's argument are stripped, so Go templates can't quote, and
   Chromium 134-136 third-party builds only create the profile certificate
   store with `--enable-features=EnableCertManagementUIV2Write`, which the
-  launcher and shortcut now pass). macOS is syntax-checked only (bash,
-  shellcheck). Winget's `Hibbiki.Chromium` manifest 155.0.8059.85 is
+  launcher and shortcut now pass). macOS: the first run (Oct 19, 2026,
+  Apple Silicon) stopped at Docker Desktop on an outdated Homebrew, and
+  Homebrew's `chromium` cask turned out disabled; fixed (`brew update`
+  first, ungoogled-chromium) but not yet rerun past that step. Winget's `Hibbiki.Chromium` manifest 155.0.8059.85 is
   marked `portable`, so a Windows machine with no Chromium may fail at
   that step until the next manifest. The system-level installers were dropped and Linux moved from
   Docker Desktop to Docker Engine (Oct 19, 2026); the Engine path is

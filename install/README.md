@@ -21,8 +21,8 @@ Hub (`SCS_IMAGE_REPO` points elsewhere).
 
 ## Dedicated browser
 
-Installs Chromium (snap or distribution package on Linux, Homebrew cask on
-macOS, Hibbiki's build from its GitHub release on Windows, verified against
+Installs Chromium (snap or distribution package on Linux, Homebrew's `ungoogled-chromium` cask on
+macOS, since its `chromium` cask is disabled, Hibbiki's build from its GitHub release on Windows, verified against
 the release's SHA-256) and adds a **Sissy Browser** launcher with its
 own icon (`docs/brand/browser-icon.svg`, shipped in the image). It opens a separate profile with
 `--proxy-server=127.0.0.1:8080` and trusts the proxy's CA in that profile's

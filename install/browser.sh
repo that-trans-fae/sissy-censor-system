@@ -97,6 +97,21 @@ brew_bin() {
   fi
 }
 
+# Installs a cask, updating Homebrew first (once): an old Homebrew can't read
+# the current cask definitions ("Unexpected method ... called on Cask") and
+# exits non-zero even when the app got installed, so callers check for the
+# app rather than trusting the exit status.
+BREW_UPDATED=0
+brew_cask_install() {
+  local brew; brew=$(brew_bin)
+  if [ "$BREW_UPDATED" -eq 0 ]; then
+    log "Updating Homebrew"
+    "$brew" update || warn "Homebrew did not update; installing with the version you have"
+    BREW_UPDATED=1
+  fi
+  "$brew" install --cask "$@"
+}
+
 # ------------------------------------------------------------------ docker
 # Docker Engine from Docker's own repositories (Arch: the distribution's).
 # The script and the launcher talk to it on its socket, so a Docker Desktop
@@ -144,8 +159,8 @@ install_docker_desktop_macos() {
     return
   fi
   log "Installing Docker Desktop"
-  local brew; brew=$(brew_bin)
-  "$brew" install --cask docker-desktop || "$brew" install --cask docker
+  brew_cask_install docker-desktop || true
+  [ -d /Applications/Docker.app ] || die "Docker Desktop did not install; see Homebrew's output above"
 }
 
 GROUP_ADDED=0
@@ -366,8 +381,14 @@ CHROMIUM=
 install_chromium() {
   if [ "$OS" = Darwin ]; then
     if [ ! -d /Applications/Chromium.app ]; then
-      log "Installing Chromium"
-      "$(brew_bin)" install --cask --no-quarantine chromium
+      # Homebrew disabled its chromium cask (Sep 2026, fails Gatekeeper).
+      # ungoogled-chromium installs the same Chromium.app, with H.264 for
+      # the video control. It isn't notarized, so the quarantine flag comes
+      # off (current Homebrew dropped --no-quarantine).
+      log "Installing Chromium (ungoogled-chromium)"
+      brew_cask_install ungoogled-chromium || true
+      [ -d /Applications/Chromium.app ] || die "Chromium did not install; see Homebrew's output above"
+      xattr -dr com.apple.quarantine /Applications/Chromium.app 2>/dev/null || true
     fi
     CHROMIUM=/Applications/Chromium.app/Contents/MacOS/Chromium
     return
@@ -765,7 +786,8 @@ remove_chromium() {
   log "Removing Chromium"
   if [ "$OS" = Darwin ]; then
     local brew; brew=$(brew_bin)
-    if [ -n "$brew" ] && "$brew" list --cask chromium >/dev/null 2>&1; then "$brew" uninstall --cask chromium
+    if [ -n "$brew" ] && "$brew" list --cask ungoogled-chromium >/dev/null 2>&1; then "$brew" uninstall --cask ungoogled-chromium
+    elif [ -n "$brew" ] && "$brew" list --cask chromium >/dev/null 2>&1; then "$brew" uninstall --cask chromium
     else warn "Chromium was not installed by Homebrew; drag $c to the Trash"
     fi
     return
