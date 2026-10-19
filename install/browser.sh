@@ -311,6 +311,16 @@ install_launcher_linux() {
       convert -background none -density 384 "$ICON_SVG" -resize "${size}x${size}" "$icons/${size}x${size}/apps/$BROWSER_ID.png" 2>/dev/null || true
     fi
   done
+  # Ubuntu's GNOME Shell only honours StartupWMClass for a Chromium snap
+  # window when the entry runs /snap/bin/chromium itself (its
+  # chromium-snap-pwa patch); through the launcher script the window is
+  # grouped with Chromium in the dock. The entry then skips the launcher's
+  # proxy start and CA re-trust: the container restarts with Docker
+  # (unless-stopped) and init_profile has trusted the CA.
+  local exec="$bin"
+  case $CHROMIUM in
+    /snap/*) exec="$CHROMIUM \"--user-data-dir=$(profile_dir)\" --proxy-server=$PROXY_HOST:$PROXY_PORT --class=SissyBrowser --no-first-run --no-default-browser-check" ;;
+  esac
   # The icon is given by path: a stale icon-theme.cache in ~/.local/share/icons
   # otherwise hides a freshly added icon name from GNOME.
   cat >"$HOME/.local/share/applications/$BROWSER_ID.desktop" <<EOF
@@ -318,7 +328,7 @@ install_launcher_linux() {
 Type=Application
 Name=$BROWSER_NAME
 Comment=Chromium through the Sissy Censor System proxy
-Exec=$bin %U
+Exec=$exec %U
 Icon=$icon
 Terminal=false
 Categories=Network;WebBrowser;

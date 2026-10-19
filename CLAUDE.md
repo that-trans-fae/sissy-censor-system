@@ -167,6 +167,11 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
 - Chromium (snap) only trusts the proxy CA through the `CACertificates`
   policy; the NSS database route registers it as an intermediate. Its
   updater hosts are on the built-in whitelist because they ignore the policy.
+- Ubuntu's GNOME Shell (its chromium-snap-pwa patch) only honours a
+  `StartupWMClass` for a Chromium snap window when the `.desktop` entry's
+  `Exec` is `/snap/bin/chromium` itself. An entry that runs a wrapper
+  script gets the browser grouped with Chromium in the dock, so for snap
+  the installer's entry calls Chromium directly.
 - `src/mitmproxy/` holds the CA private key: never commit or share it.
 - `docker ps` truncates commands, so grepping its output for a script name
   silently matches nothing; use `--no-trunc` (or `--filter`) before killing
