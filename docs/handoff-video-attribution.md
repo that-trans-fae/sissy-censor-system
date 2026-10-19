@@ -80,7 +80,7 @@ with a man in frame must stay censored. Get counter-examples before tuning.
 
 ## Data and scripts
 
-All under `/home/marissa/Repositories/scs/docs/samples/video/` in the main
+All under `docs/samples/video/` in the main
 checkout (gitignored, so not in your worktree; use the absolute path):
 
 - `6710b29dca308.scores.json`: every 320n sample of the reported video
@@ -107,7 +107,7 @@ view the frames.
 - **Samples:** `docs/samples/` isn't in the worktree, so
   `tests/test_samples.py` skips. Mount the main checkout's samples into the
   test container:
-  `-v /home/marissa/Repositories/scs/docs/samples:/w/docs/samples:ro`
+  `-v <main checkout>/docs/samples:/w/docs/samples:ro`
   (Docker Desktop only mounts paths under `/home`; the worktree must be
   under `/home` too).
 - **The user's live proxy:** don't `docker compose up` from the worktree.

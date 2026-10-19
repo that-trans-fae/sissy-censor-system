@@ -1,6 +1,6 @@
 # Image Censoring Proxy — Project Handoff
 
-Oct 18, 2026 · @Marissa
+Oct 18, 2026
 
 ## Project overview
 
