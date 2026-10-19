@@ -17,3 +17,5 @@ whitelist:
   # banks, health sites, streaming and YouTube, .gov/.mil/.edu, gov.uk,
   # edu.au). Managed from the admin panel's Whitelist tab.
   domains: []
+detection:
+  male_context_exempts: false
