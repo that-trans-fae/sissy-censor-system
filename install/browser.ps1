@@ -36,6 +36,8 @@ $ChromiumWingetId = 'Hibbiki.Chromium'
 $BrowserHome = Join-Path $env:LOCALAPPDATA 'SissyBrowser'
 $ProfileDir = Join-Path $BrowserHome 'profile'
 $IconPath = Join-Path $BrowserHome 'sissy-browser.ico'
+$AdminUrl = 'http://localhost:8082/admin'
+$AdminBookmark = 'SCS admin panel'
 $Shortcuts = @(
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$BrowserName.lnk"),
     (Join-Path ([Environment]::GetFolderPath('Desktop')) "$BrowserName.lnk")
@@ -241,6 +243,56 @@ function Install-Shortcuts($chromium) {
     }
 }
 
+# Seeds the profile so the bookmark bar is shown with the admin panel on it.
+# Chromium reads these files when the profile first opens and fills in the
+# ids and checksum itself; an existing profile gets the bookmark inserted.
+function Write-Json($path, $data) {
+    $json = $data | ConvertTo-Json -Depth 20
+    [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))   # no BOM
+}
+
+function Seed-Profile {
+    $default = Join-Path $ProfileDir 'Default'
+    $bookmarks = Join-Path $default 'Bookmarks'
+    $prefs = Join-Path $default 'Preferences'
+    $lock = Join-Path $ProfileDir 'lockfile'
+    if (Test-Path $lock) {
+        try { [System.IO.File]::Open($lock, 'Open', 'ReadWrite', 'None').Dispose() }
+        catch { Warn "$BrowserName is running; close it and rerun to add the admin panel bookmark"; return }
+    }
+    Log 'Putting the admin panel on the bookmark bar'
+    New-Item -ItemType Directory -Force -Path $default | Out-Null
+    $entry = [ordered]@{ name = $AdminBookmark; type = 'url'; url = $AdminUrl }
+    if (-not (Test-Path $bookmarks)) {
+        Write-Json $bookmarks ([ordered]@{
+            roots = [ordered]@{
+                bookmark_bar = [ordered]@{ children = @($entry); name = 'Bookmarks bar'; type = 'folder' }
+                other        = [ordered]@{ children = @(); name = 'Other bookmarks'; type = 'folder' }
+                synced       = [ordered]@{ children = @(); name = 'Mobile bookmarks'; type = 'folder' }
+            }
+            version = 1
+        })
+    } else {
+        $data = Get-Content -Raw $bookmarks | ConvertFrom-Json
+        $bar = $data.roots.bookmark_bar
+        if (-not ($bar.children | Where-Object { $_.url -eq $AdminUrl })) {
+            $bar.children = @([pscustomobject]$entry) + @($bar.children)
+            $data.PSObject.Properties.Remove('checksum')   # Chromium recomputes it
+            Write-Json $bookmarks $data
+        }
+    }
+    if (-not (Test-Path $prefs)) {
+        Write-Json $prefs @{ bookmark_bar = @{ show_on_all_tabs = $true } }
+    } else {
+        $data = Get-Content -Raw $prefs | ConvertFrom-Json
+        if (-not $data.bookmark_bar) { $data | Add-Member -NotePropertyName bookmark_bar -NotePropertyValue ([pscustomobject]@{}) }
+        if (-not $data.bookmark_bar.show_on_all_tabs) {
+            $data.bookmark_bar | Add-Member -Force -NotePropertyName show_on_all_tabs -NotePropertyValue $true
+            Write-Json $prefs $data
+        }
+    }
+}
+
 function Uninstall-Shortcuts {
     Log "Removing the $BrowserName shortcuts and profile"
     foreach ($path in $Shortcuts) { Remove-Item -Force -ErrorAction SilentlyContinue $path }
@@ -261,11 +313,12 @@ Get-Repo
 Start-Proxy
 $chromium = Install-Chromium
 Install-Shortcuts $chromium
+Seed-Profile
 
 Log 'Installed'
 Write-Host @"
     Shortcut:     $BrowserName (Start menu and desktop)
-    Profile:      $ProfileDir
+    Profile:      $ProfileDir (bookmark bar: $AdminBookmark)
     Proxy:        $ProxyHost`:$ProxyPort (Docker, starts with Windows)
     Admin panel:  http://localhost:8082/admin
     Checkout:     $ScsDir

@@ -52,8 +52,11 @@ macOS, winget on Windows) and adds a **Sissy Browser** launcher with its
 own icon (`docs/brand/browser-icon.svg`). It opens a separate profile with
 `--proxy-server=127.0.0.1:8080` and trusts the proxy's CA through
 `--ignore-certificate-errors-spki-list`, so nothing is added to the system
-trust store and your other browsers are untouched. On Linux and macOS the
-launcher also starts the proxy container if Docker is up.
+trust store and your other browsers are untouched. The profile starts with
+the bookmark bar shown and the admin panel (`http://localhost:8082/admin`)
+on it; rerunning the installer adds the bookmark to an existing profile if
+it is missing (close the browser first). On Linux and macOS the launcher
+also starts the proxy container if Docker is up.
 
 Linux and macOS:
 

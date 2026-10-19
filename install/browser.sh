@@ -31,6 +31,8 @@ PROXY_HOST=127.0.0.1
 PROXY_PORT=8080
 CA_PEM="$SCS_DIR/src/mitmproxy/mitmproxy-ca-cert.pem"
 ICON_SVG="$SCS_DIR/docs/brand/browser-icon.svg"
+ADMIN_URL="http://localhost:8082/admin"
+ADMIN_BOOKMARK="SCS admin panel"
 OS=$(uname -s)
 
 # ----------------------------------------------------------------- helpers
@@ -313,6 +315,62 @@ EOF
   touch "$app"
 }
 
+# Seeds the profile so the bookmark bar is shown with the admin panel on it.
+# Chromium reads these files when the profile first opens and fills in the
+# ids and checksum itself; an existing profile gets the bookmark inserted.
+seed_profile() {
+  local base; base=$(profile_dir)
+  local dir="$base/Default"
+  local bookmarks="$dir/Bookmarks" prefs="$dir/Preferences"
+  if [ -e "$base/SingletonLock" ] || [ -e "$base/SingletonSocket" ]; then
+    warn "$BROWSER_NAME is running; close it and rerun to add the admin panel bookmark"
+    return
+  fi
+  log "Putting the admin panel on the bookmark bar"
+  mkdir -p "$dir"
+  if [ ! -s "$bookmarks" ]; then
+    cat >"$bookmarks" <<EOF
+{
+  "roots": {
+    "bookmark_bar": {
+      "children": [ { "name": "$ADMIN_BOOKMARK", "type": "url", "url": "$ADMIN_URL" } ],
+      "name": "Bookmarks bar", "type": "folder"
+    },
+    "other": { "children": [], "name": "Other bookmarks", "type": "folder" },
+    "synced": { "children": [], "name": "Mobile bookmarks", "type": "folder" }
+  },
+  "version": 1
+}
+EOF
+  elif ! grep -q "$ADMIN_URL" "$bookmarks"; then
+    have python3 || { warn "python3 is needed to edit $bookmarks; add $ADMIN_URL by hand"; return; }
+    python3 - "$bookmarks" "$ADMIN_BOOKMARK" "$ADMIN_URL" <<'EOF'
+import json, sys
+path, name, url = sys.argv[1:]
+with open(path) as f:
+    data = json.load(f)
+bar = data.setdefault("roots", {}).setdefault("bookmark_bar", {"name": "Bookmarks bar", "type": "folder"})
+bar.setdefault("children", []).insert(0, {"name": name, "type": "url", "url": url})
+data.pop("checksum", None)   # Chromium recomputes it
+with open(path, "w") as f:
+    json.dump(data, f, indent=3)
+EOF
+  fi
+  if [ ! -s "$prefs" ]; then
+    printf '{ "bookmark_bar": { "show_on_all_tabs": true } }\n' >"$prefs"
+  elif ! grep -q '"show_on_all_tabs": true' "$prefs" && have python3; then
+    python3 - "$prefs" <<'EOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+data.setdefault("bookmark_bar", {})["show_on_all_tabs"] = True
+with open(path, "w") as f:
+    json.dump(data, f, indent=3)
+EOF
+  fi
+}
+
 uninstall_launcher() {
   log "Removing the $BROWSER_NAME launcher and its profile"
   if [ "$OS" = Linux ]; then
@@ -339,11 +397,12 @@ start_proxy
 install_chromium
 [ -f "$ICON_SVG" ] || die "icon missing from the checkout: $ICON_SVG"
 if [ "$OS" = Linux ]; then install_launcher_linux; else install_launcher_macos; fi
+seed_profile
 
 log "Installed"
 cat <<EOF
     Launcher:     $BROWSER_NAME (in your app menu$( [ "$OS" = Darwin ] && echo " and ~/Applications"))
-    Profile:      $(profile_dir)
+    Profile:      $(profile_dir) (bookmark bar: $ADMIN_BOOKMARK)
     Proxy:        $PROXY_HOST:$PROXY_PORT (Docker, restarts with the machine)
     Admin panel:  http://localhost:8082/admin
     Checkout:     $SCS_DIR
