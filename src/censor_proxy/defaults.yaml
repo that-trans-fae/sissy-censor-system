@@ -320,6 +320,21 @@ whitelist:
     - '^optimizationguide-pa\.googleapis\.com:'
     - '(^|\.)gvt1\.com:'
     - '^dl\.google\.com:'
+    # Operating system and firmware updates: packages and signed metadata,
+    # no page images. Ubuntu archives (country mirrors included), PPAs and
+    # the Snap store; Flathub; fwupd; Debian; Fedora; Windows Update; Apple
+    # software updates.
+    - '(^|\.)(archive|security|ports|esm|changelogs|motd|keyserver)\.ubuntu\.com:'
+    - '^ppa\.(launchpad|launchpadcontent)\.net:'
+    - '^api\.snapcraft\.io:'
+    - '(^|\.)snapcraftcontent\.com:'
+    - '^dl\.flathub\.org:'
+    - '(^|\.)fwupd\.org:'
+    - '^(deb|security)\.debian\.org:'
+    - '^(mirrors|dl|download)\.fedoraproject\.org:'
+    - '(^|\.)(windowsupdate|update\.microsoft|delivery\.mp\.microsoft)\.com:'
+    - '^(swscan|swdist|swcdn|mesu|gdmf)\.apple\.com:'
+    - '^updates\.cdn-apple\.com:'
     # Sign-in providers.
     - '^accounts\.google\.com:'
     - '^login\.(microsoftonline|live)\.com:'
@@ -333,13 +348,41 @@ whitelist:
     - '(^|\.)stripe\.(com|network):'
     - '(^|\.)braintreegateway\.com:'
     - '(^|\.)paypal\.com:'
-    # Common US banks and card issuers.
-    - '(^|\.)(chase|bankofamerica|wellsfargo|citi|citibank|usbank|capitalone|pnc|truist|tdbank|ally|discover|americanexpress|usaa|regions|citizensbank|53|key|huntington|mtb|sofi|chime|marcus|synchrony)\.com:'
-    - '(^|\.)navyfederal\.org:'
+    # US banks, card issuers and credit unions.
+    - '(^|\.)(chase|bankofamerica|wellsfargo|citi|citibank|usbank|capitalone|pnc|truist|tdbank|ally|discover|americanexpress|usaa|regions|citizensbank|53|key|huntington|mtb|sofi|chime|marcus|synchrony|bmo|firstcitizens|frostbank|comerica|zionsbank|santanderbank|barclaysus|axos|goldmansachs|breadfinancial|golden1)\.com:'
+    - '(^|\.)(navyfederal|penfed|becu|alliantcreditunion|schoolsfirstfcu)\.org:'
+    - '(^|\.)comenity\.net:'
+    # Credit bureaus and tax filing.
+    - '(^|\.)(experian|equifax|transunion|creditkarma|intuit|hrblock)\.com:'
+    # UK, Australian and Canadian banks.
+    - '(^|\.)(hsbc|barclays|santander|nationwide|halifax|rbs|tsb)\.co\.uk:'
+    - '(^|\.)(lloydsbank|natwest|monzo|starlingbank)\.com:'
+    - '(^|\.)(commbank|westpac|anz|nab|ing)\.com\.au:'
+    - '(^|\.)(rbcroyalbank|td|scotiabank|cibc)\.com:'
+    - '(^|\.)tangerine\.ca:'
     # Brokerages and retirement accounts.
-    - '(^|\.)(schwab|fidelity|vanguard|etrade|robinhood|merrilledge|empower)\.com:'
-    # US government, military and education sites.
-    - '\.(gov|mil|edu):'
+    - '(^|\.)(schwab|fidelity|vanguard|etrade|robinhood|merrilledge|empower|interactivebrokers|wealthfront|betterment|webull|principal|morganstanley)\.com:'
+    - '(^|\.)tiaa\.org:'
+    # Health: patient portals (Epic MyChart runs on each provider's own
+    # mychart.<domain> host), insurers, pharmacies, labs and HSAs. Add your
+    # own provider's portal if it lives elsewhere.
+    - '(^|\.)mychart\.[^:]+:'
+    - '(^|\.)(followmyhealth|healow|athenahealth|nextmd)\.com:'
+    - '(^|\.)(uhc|myuhc|optum|optumrx|aetna|cigna|anthem|bcbs|humana|centene|ambetterhealth|molinahealthcare|healthnet|hioscar)\.com:'
+    - '(^|\.)(kp|kaiserpermanente|mayoclinic|clevelandclinic)\.org:'
+    - '(^|\.)(cvs|caremark|walgreens|express-scripts|questdiagnostics|labcorp|healthequity|hsabank)\.com:'
+    - '(^|\.)nhs\.uk:'
+    # Streaming services and the CDNs they play from. Their video is DRM
+    # protected, so the video control can't offer a censored copy and would
+    # leave their players covered. Their artwork passes uncensored.
+    - '(^|\.)(netflix|disneyplus|hulu|max|hbomax|primevideo|paramountplus|peacocktv|crunchyroll|funimation|hidive|discoveryplus|tubitv)\.com:'
+    - '(^|\.)(nflxext|nflximg|bamgrid|dssott|hulustream|huluim)\.com:'
+    - '(^|\.)(nflxvideo|nflximg|nflxso|disney-plus)\.net:'
+    - '(^|\.)pluto\.tv:'
+    - '^tv\.apple\.com:'
+    # Government, military and education sites: US, UK government and
+    # Australian education.
+    - '\.(gov|mil|edu|gov\.uk|edu\.au):'
     # Identity verification used by government sign-ins.
     - '(^|\.)id\.me:'
   # Also pass requests made by a whitelisted page (matched by Referer or

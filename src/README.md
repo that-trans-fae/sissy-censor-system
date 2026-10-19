@@ -86,10 +86,15 @@ rejected at startup.
 
 Whitelisted hosts bypass TLS interception entirely, so the proxy never sees
 their logins and nothing they serve is censored. The built-in list
-(`whitelist.builtin`, regexes on `host:port`) covers Chromium's updaters,
-sign-in providers, password managers, payment processors, common US banks and
-brokerages, and every `.gov`, `.mil` and `.edu` site. Add your own (your bank,
-health portal, employer or university sign-in, `youtube.com`) as plain domains
+(`whitelist.builtin`, regexes on `host:port`) covers Chromium's updaters and
+operating system updates (Ubuntu, Snap, Flathub, fwupd, Debian, Fedora,
+Windows, Apple), sign-in providers, password managers, payment processors,
+banks, brokerages and credit bureaus (US, UK, Australia, Canada), health
+portals (MyChart), insurers, pharmacies and labs, streaming services
+(Netflix, Disney+, Hulu, Max, Prime Video, Paramount+, Peacock, Crunchyroll,
+HIDIVE, Apple TV+ and others), and every `.gov`, `.mil`,
+`.edu`, `gov.uk` and `edu.au` site. Add your own (your bank, health portal,
+employer or university sign-in, `youtube.com`) as plain domains
 in `whitelist.domains`, from the panel's Whitelist tab; they cover their
 subdomains and are added to the built-in list, while setting `builtin` itself
 replaces it. By default what a whitelisted page loads from other hosts passes

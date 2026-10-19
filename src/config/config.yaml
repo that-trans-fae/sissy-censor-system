@@ -13,7 +13,8 @@ video:
 
 whitelist:
   # Not intercepted at all, with their subdomains; added to the built-in
-  # list (Chromium updaters, sign-in, password managers, payments, common
-  # banks, .gov/.mil/.edu). Managed from the admin panel's Whitelist tab.
+  # list (browser and OS updates, sign-in, password managers, payments,
+  # banks, health sites, streaming, .gov/.mil/.edu, gov.uk, edu.au).
+  # Managed from the admin panel's Whitelist tab.
   domains:
     - youtube.com

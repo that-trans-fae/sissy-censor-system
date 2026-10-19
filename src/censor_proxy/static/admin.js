@@ -274,8 +274,8 @@
     const s = pattern.replace(/^\(\^\|\\\.\)/, "").replace(/^\^/, "").replace(/:$/, "");
     const m = s.match(/^([^()|]*)\(([^()]*)\)([^()|]*)$/);
     const parts = m ? m[2].split("|").map((a) => m[1] + a + m[3]) : [s];
-    const plain = parts.map((p) => p.replace(/\\\./g, "."));
-    return plain.every((p) => /^[a-z0-9.-]+$/i.test(p)) ? plain : [pattern];
+    const plain = parts.map((p) => p.replace(/\\\./g, ".").replace("[^:]+", "*"));
+    return plain.every((p) => /^[a-z0-9.*-]+$/i.test(p)) ? plain : [pattern];
   }
 
   function whitelisted(view, domain) {

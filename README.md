@@ -81,9 +81,10 @@ keys are rejected at startup.
   lives in `src/mitmproxy/`: never commit or share it.
 - The port is bound to loopback only. Don't expose it to your network.
 - Whitelisted hosts bypass interception entirely: the built-in list covers
-  browser updaters, sign-in, password managers, payments, common banks and
-  .gov/.mil/.edu; add your own from the admin panel's Whitelist tab
-  (`whitelist.domains`).
+  browser and OS updates, sign-in, password managers, payments, banks,
+  health sites, streaming services, .gov/.mil/.edu, gov.uk and edu.au; add
+  your own from the
+  admin panel's Whitelist tab (`whitelist.domains`).
 - Video injection extends every page's Content-Security-Policy to allow the
   injected script, and lets pages ask the proxy to fetch public video URLs.
   Narrow `video.hosts` to limit this. Private and loopback addresses are

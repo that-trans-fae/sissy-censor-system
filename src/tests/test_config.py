@@ -135,7 +135,13 @@ def _passed_through(cfg, host):
     "update.googleapis.com", "accounts.google.com", "login.microsoftonline.com",
     "my.1password.com", "js.stripe.com", "www.paypal.com", "secure.chase.com",
     "www.53.com", "client.schwab.com", "sa.www4.irs.gov", "api.id.me",
-    "www.nga.gov", "www.army.mil", "www.si.edu",
+    "www.nga.gov", "www.army.mil", "www.si.edu", "www.gov.uk", "www.tax.service.gov.uk",
+    "www.sydney.edu.au", "mychart.clevelandclinic.org", "www.mychart.com", "www.myuhc.com",
+    "www.cvs.com", "www.nhs.uk", "www.hsbc.co.uk", "www.commbank.com.au", "www.equifax.com",
+    "us.archive.ubuntu.com", "security.ubuntu.com", "api.snapcraft.io",
+    "fastly.cdn.snapcraftcontent.com", "download.windowsupdate.com", "swcdn.apple.com",
+    "www.crunchyroll.com", "www.disneyplus.com", "ipv4-c001.nflxvideo.net", "play.max.com",
+    "tv.apple.com", "pluto.tv",
 ])
 def test_builtin_whitelist_covers(make_config, host):
     assert _passed_through(make_config(), host)
@@ -147,6 +153,9 @@ def test_builtin_whitelist_covers(make_config, host):
     "www.google.com", "encrypted-tbn0.gstatic.com", "lh3.googleusercontent.com",
     "www.paypalobjects.com", "i.imgur.com", "cdn.discordapp.com",
     "chase.com.example.net", "notchase.com", "gov.example.com", "edu.example.net",
+    "gov.uk.example.com", "edu.au.example.net", "mychartxyz.com", "www.ubuntu.com",
+    "launchpad.net", "snapcraft.io", "www.amazon.com", "m.media-amazon.com",
+    "www.apple.com",
 ])
 def test_builtin_whitelist_leaves_image_hosts(make_config, host):
     assert not _passed_through(make_config(), host)
