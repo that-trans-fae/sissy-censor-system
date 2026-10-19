@@ -1,5 +1,6 @@
 """Internal HTTP server behind https://censor.local (the addon routes that host
-here). Serves /health, the injected script and the video job API.
+here). Serves /health, the injected script (video control and image placeholders)
+and the video job API.
 
   GET  /health
   GET  /inject.js
@@ -62,7 +63,12 @@ class InternalServer:
         values = {"__CENSOR_ORIGIN__": f"https://{self.cfg.proxy.health_host}",
                   "__BRAND_NAME__": self.cfg.video.brand_name,
                   "__DEBUG__": "true" if self.cfg.video.debug else "false",
-                  "__MAX_HEIGHT__": str(self.cfg.video.max_height)}
+                  "__MAX_HEIGHT__": str(self.cfg.video.max_height),
+                  "__VIDEO__": "true" if self.cfg.video.enabled else "false",
+                  "__PLACEHOLDERS__": "true" if self.cfg.images.placeholders else "false",
+                  "__PLACEHOLDER_MS__": str(self.cfg.images.placeholder_delay_ms),
+                  "__PLACEHOLDER_MIN_PX__": str(self.cfg.images.placeholder_min_px),
+                  "__PLACEHOLDER_RESERVE_PX__": str(self.cfg.images.placeholder_reserve_px)}
         for key, value in values.items():
             js = js.replace(key, json.dumps(value)[1:-1])
         return js.encode()

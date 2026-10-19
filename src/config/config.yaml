@@ -8,13 +8,12 @@ logging:
   level: debug             # off | info (hostnames) | debug (full URLs); debug while testing
 
 proxy:
-  # Hosts that bypass TLS interception (regexes on host:port), e.g. for
-  # certificate-pinned clients.
-  passthrough_hosts:
-    # Chromium background services that don't honour the CACertificates
-    # policy. No page images come from them.
-    - '^update\.googleapis\.com:'
-    - '^optimizationguide-pa\.googleapis\.com:'
+  # Extra hosts that bypass TLS interception (regexes on host:port), added to
+  # the defaults (Chromium updaters, sign-in, password managers, payments,
+  # common banks, .gov/.mil/.edu). Nothing from these hosts is censored.
+  # For example:
+  #   - '(^|\.)mychart\.example\.org:'
+  extra_passthrough_hosts: []
 
 video:
   # Temporarily on while debugging video pages; logs page URLs.

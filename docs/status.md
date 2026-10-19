@@ -9,7 +9,8 @@ Last updated Oct 18, 2026.
 
 - Docker image (`src/Dockerfile`, `src/compose.yaml`) with mitmproxy, NudeNet
   320n (default) and 640m weights baked in
-- `censor.py` addon: Content-Type routing, passthrough hosts, size floor,
+- `censor.py` addon: Content-Type routing, passthrough hosts (a default list
+  plus `extra_passthrough_hosts`), size floor,
   `censor.local/health`, fail-closed on errors and timeouts
 - `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
   sampling and a content-hash cache
@@ -29,6 +30,16 @@ Last updated Oct 18, 2026.
   positives preferred to misses)
 - Branding: mark, palette and README banners in `docs/brand/`; the video
   overlay restyled to match (checked in a browser on a static test page)
+- Image placeholders: the injected script covers images still loading
+  (queued at the censor) with a "Censoring" card. Checked in a browser on a
+  static test page with a simulated queue (alignment, rounded corners,
+  clipping in a scroller, sticky header on top, click-through, cleared on
+  load; unsized GIFs held open and released, tracking pixels and icons left
+  alone); not yet tried on real sites. Not covered: CSS background images,
+  images opened directly in a tab
+- Queue bypass: images that need no detection (small, unsupported, cached),
+  and text bodies whose data URIs are all such images, no longer wait for a
+  detection worker
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, domain whitelist (`youtube.com` in the
   example config), censoring levels (strict, lax, custom; any number of

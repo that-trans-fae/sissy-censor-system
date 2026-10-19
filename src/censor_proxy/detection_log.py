@@ -4,7 +4,8 @@ Levels:
   off    nothing is written
   info   images with an explicit-region detection (censored or not), and
          every fail-closed or error; hostname only
-  debug  every image response, including skipped ones, with the full URL,
+  debug  every image response, including skipped ones, with the full URL
+         and each box's opposite-sex counterpart score ("vs"),
          and every response requested as an image (Sec-Fetch-Dest: image)
          that wasn't scanned, as action "unscanned" with the reason
 """
@@ -18,6 +19,7 @@ import os
 import time
 
 from .config import Config
+from .detection import counterpart_scores
 from .imaging import ScanResult
 
 _logger = logging.getLogger("censor_proxy.detections")
@@ -27,7 +29,7 @@ _logger.propagate = False
 class DetectionLog:
     def __init__(self, cfg: Config):
         self.level = cfg.logging.level
-        dcfg = cfg.detection
+        dcfg = self._dcfg = cfg.detection
         self._relevant = (dcfg.female_labels | dcfg.unsexed_labels
                           | {label for label in dcfg.male_context_labels if not label.startswith("FACE_")})
         for h in list(_logger.handlers):
@@ -40,6 +42,12 @@ class DetectionLog:
             handler.setFormatter(logging.Formatter("%(message)s"))
             _logger.addHandler(handler)
             _logger.setLevel(logging.INFO)
+
+    def _vs(self, detection) -> dict:
+        if self.level != "debug":
+            return {}
+        vs = counterpart_scores(detection, self._dcfg)
+        return {"vs": vs} if vs else {}
 
     def record(self, result: ScanResult, host: str, url: str, mime: str,
                source: str = "response") -> None:
@@ -69,7 +77,8 @@ class DetectionLog:
             "cached": result.cached,
             "detections": [
                 {**d.detection.as_dict(), "censor": d.censor, "why": d.reason,
-                 **({"frame": i} if result.frames > 1 else {})}
+                 **({"frame": i} if result.frames > 1 else {}),
+                 **self._vs(d.detection)}
                 for i, ds in result.frame_decisions for d in ds
             ],
         }

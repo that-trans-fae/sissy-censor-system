@@ -68,6 +68,12 @@ class DetectionConfig:
     overlap_context_threshold: float
     proximity: float
     male_context_exempts: bool
+    male_counterparts: dict[str, str]
+    male_score_ratio: float
+    yields_to_male: frozenset[str]
+    male_priority_labels: frozenset[str]
+    male_priority_threshold: float
+    male_priority_overlap: float
 
     def threshold_for(self, label: str) -> float:
         return self.label_thresholds.get(label, self.threshold)
@@ -99,6 +105,10 @@ class ImagesConfig:
     frame_step: int
     max_detect_frames: int
     max_frames: int
+    placeholders: bool
+    placeholder_delay_ms: int
+    placeholder_min_px: int
+    placeholder_reserve_px: int
 
 
 @dataclass(frozen=True)
@@ -144,9 +154,15 @@ class VideoConfig:
 @dataclass(frozen=True)
 class ProxyConfig:
     passthrough_hosts: tuple[str, ...]
+    extra_passthrough_hosts: tuple[str, ...]
     health_host: str
     admin_host: str
     internal_port: int
+
+    @property
+    def ignore_hosts(self) -> tuple[str, ...]:
+        """Every passthrough pattern: the defaults plus the user's extras."""
+        return self.passthrough_hosts + self.extra_passthrough_hosts
 
 
 @dataclass(frozen=True)
@@ -287,6 +303,12 @@ def _build(raw: dict[str, Any]) -> Config:
             overlap_context_threshold=float(d["overlap_context_threshold"]),
             proximity=float(d["proximity"]),
             male_context_exempts=bool(d["male_context_exempts"]),
+            male_counterparts={str(k): str(v) for k, v in (d["male_counterparts"] or {}).items()},
+            male_score_ratio=float(d["male_score_ratio"]),
+            yields_to_male=frozenset(d["yields_to_male"] or ()),
+            male_priority_labels=frozenset(d["male_priority_labels"] or ()),
+            male_priority_threshold=float(d["male_priority_threshold"]),
+            male_priority_overlap=float(d["male_priority_overlap"]),
         ),
         "censor": CensorConfig(**{**c, "fill_color": tuple(c["fill_color"])}),
         "images": ImagesConfig(**{
@@ -303,6 +325,7 @@ def _build(raw: dict[str, Any]) -> Config:
         "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ())}),
         "proxy": ProxyConfig(
             passthrough_hosts=tuple(raw["proxy"]["passthrough_hosts"] or ()),
+            extra_passthrough_hosts=tuple(raw["proxy"]["extra_passthrough_hosts"] or ()),
             health_host=raw["proxy"]["health_host"],
             admin_host=str(raw["proxy"]["admin_host"]).lower(),
             internal_port=int(raw["proxy"]["internal_port"]),
@@ -331,15 +354,24 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"censor.style must be one of {CENSOR_STYLES}, got {cfg.censor.style!r}")
     if cfg.logging.level not in LOG_LEVELS:
         raise ConfigError(f"logging.level must be one of {LOG_LEVELS}, got {cfg.logging.level!r}")
+    if cfg.detection.male_score_ratio < 0:
+        raise ConfigError("detection.male_score_ratio must be >= 0")
+    if not 0 < cfg.detection.male_priority_overlap <= 1:
+        raise ConfigError("detection.male_priority_overlap must be in (0, 1]")
     if cfg.images.frame_step < 1:
         raise ConfigError("images.frame_step must be >= 1")
     if cfg.images.max_detect_frames < 2:
         raise ConfigError("images.max_detect_frames must be >= 2")
+    if min(cfg.images.placeholder_delay_ms, cfg.images.placeholder_min_px,
+           cfg.images.placeholder_reserve_px) < 0:
+        raise ConfigError("images.placeholder_delay_ms, placeholder_min_px and "
+                          "placeholder_reserve_px must be >= 0")
     if not 1 <= cfg.censor.quality <= 100:
         raise ConfigError("censor.quality must be between 1 and 100")
     if len(cfg.censor.fill_color) != 3:
         raise ConfigError("censor.fill_color must be [R, G, B]")
     for key, patterns in (("proxy.passthrough_hosts", cfg.proxy.passthrough_hosts),
+                          ("proxy.extra_passthrough_hosts", cfg.proxy.extra_passthrough_hosts),
                           ("video.hosts", cfg.video.hosts)):
         for pattern in patterns:
             try:

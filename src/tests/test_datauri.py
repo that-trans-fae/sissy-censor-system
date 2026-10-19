@@ -80,6 +80,14 @@ def test_small_and_non_image_uris_skipped(make_config):
             b'<img src="data:image/png;base64,!!notbase64!!">')
     result = censor_data_uris(body, Censor(cfg, fake), fail_closed=True)
     assert not result.changed and fake.calls == 0
+    # Nothing here needs the model, so the precheck pass settles it alone...
+    assert censor_data_uris(body, Censor(cfg, fake), fail_closed=True, precheck=True).results
+    # ...but not once a real image is in the body, even inside an SVG.
+    svg = b'<svg><image href="' + uri(png()) + b'"/></svg>'
+    for extra in (uri(png()), uri(svg, "svg+xml")):
+        assert censor_data_uris(body + extra, Censor(cfg, fake), fail_closed=True,
+                                precheck=True) is None
+    assert fake.calls == 0
 
 
 def test_detector_error_fails_closed_per_image(cfg):

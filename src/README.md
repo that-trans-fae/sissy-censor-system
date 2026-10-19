@@ -67,8 +67,8 @@ chromium --user-data-dir=$HOME/snap/chromium/common/censor-test --proxy-server=1
 ```
 
 Chromium's component updater ignores the policy, so `update.googleapis.com`
-and `optimizationguide-pa.googleapis.com` are in the passthrough list in
-`config/config.yaml`.
+and `optimizationguide-pa.googleapis.com` are in the default passthrough list
+(`proxy.passthrough_hosts`).
 
 ### Firefox (snap)
 
@@ -81,6 +81,17 @@ the container (or press "Reload from file" in the panel). It only needs the
 keys you change; every option and its default is documented in
 [`censor_proxy/defaults.yaml`](censor_proxy/defaults.yaml). Unknown keys are
 rejected at startup.
+
+### Passthrough hosts
+
+Hosts matching `proxy.passthrough_hosts` bypass TLS interception, so nothing
+they serve is censored. The defaults cover Chromium's updaters, sign-in
+providers, password managers, payment processors, common US banks and
+brokerages, and every `.gov`, `.mil` and `.edu` site. Add your own (your bank,
+health portal, employer or university sign-in) with
+`proxy.extra_passthrough_hosts`, which is appended to the defaults; setting
+`passthrough_hosts` itself replaces them. Only add hosts that never serve
+images you'd want censored.
 
 The detection log is `logs/detections.jsonl`. At `logging.level: info` it
 records hostnames; `debug` adds full URLs, every image scanned, and every
@@ -99,6 +110,25 @@ video, blur it with ffmpeg and stream the censored copy back; playback
 starts after a few seconds of video are ready. Videos the control can't find
 a source for stay covered. The control's text and colours are at the top of
 `censor_proxy/static/inject.js`; its name is `video.brand_name`.
+
+## Image placeholders
+
+The proxy holds each image until it is censored, so on image-heavy pages
+images queue behind each other. The same injected script covers any image
+still loading 400 ms after it comes into view (`images.placeholder_delay_ms`)
+with a "Censoring" card until it arrives. Images smaller than 48 px on the
+page get none (`images.placeholder_min_px`). Turn it off with
+`images.placeholders: false`. The page can't tell a censor queue from a slow
+network, so slow images show the card too.
+
+This covers every `<img>`, GIFs included (animated GIFs are the slowest to
+censor, often 10-20 s). An image the page gives no size takes no room while
+it loads; the card then covers the sized box it sits alone in, or else the
+image is held open at 160 px (`images.placeholder_reserve_px`) until it
+arrives. Not covered: CSS background images (the page can't see which are
+still loading), images opened directly in their own tab (there is no page to
+inject into), and "GIFs" that are really videos, which get the video cover
+instead.
 
 ## Admin panel
 

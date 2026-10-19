@@ -58,11 +58,14 @@ def site(tmp_path):
 
 
 @pytest.fixture
-def proxy(tmp_path):
+def proxy(tmp_path, request):
+    # Parametrize indirectly with (video.enabled, images.placeholders).
+    video, placeholders = getattr(request, "param", (True, True))
     log = tmp_path / "detections.jsonl"
     cfg = tmp_path / "config.yaml"
     cfg.write_text(f"logging: {{level: debug, path: '{log}'}}\n"
-                   f"video: {{cache_dir: '{tmp_path / 'video'}'}}\n"
+                   f"video: {{cache_dir: '{tmp_path / 'video'}', enabled: {str(video).lower()}}}\n"
+                   f"images: {{placeholders: {str(placeholders).lower()}}}\n"
                    f"proxy: {{internal_port: {free_port()}}}\n"
                    f"admin: {{bind: 127.0.0.1, port: {free_port()}}}\n"
                    "whitelist: {domains: [youtube.com]}\n")
@@ -109,6 +112,17 @@ def test_html_page_gets_script_and_other_bodies_pass(site, proxy):
     req = urllib.request.Request(base + "/page.html", headers={"Sec-Fetch-Dest": "document"})
     assert b'src="https://censor.local/inject.js"' in opener.open(req, timeout=30).read()
     assert opener.open(base + "/blob.bin", timeout=30).read() == b"\0" * 1024
+
+
+# The script carries the image placeholders as well as the video control, so
+# it goes in while either is on.
+@pytest.mark.parametrize("proxy,injected", [((False, True), True), ((False, False), False)],
+                         indirect=["proxy"])
+def test_script_injected_while_video_or_placeholders_on(site, proxy, injected):
+    root, base = site
+    opener, _ = proxy
+    req = urllib.request.Request(base + "/page.html", headers={"Sec-Fetch-Dest": "document"})
+    assert (b"censor.local/inject.js" in opener.open(req, timeout=30).read()) == injected
 
 
 def test_video_opened_directly_becomes_control_page(site, proxy):

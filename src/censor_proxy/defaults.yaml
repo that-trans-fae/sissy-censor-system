@@ -101,6 +101,31 @@ detection:
   # When an unsexed box is near male context and no female context, pass it.
   # false censors every unsexed box regardless.
   male_context_exempts: true
+  # The model scores every label for every box. For a female label listed
+  # here, its male counterpart's score on the same box is shown in review
+  # output and the debug log, and is used by male_score_ratio.
+  male_counterparts:
+    FEMALE_BREAST_EXPOSED: MALE_BREAST_EXPOSED
+    FEMALE_GENITALIA_EXPOSED: MALE_GENITALIA_EXPOSED
+  # Pass a female box when its male counterpart scores at least this
+  # fraction of its own score (0.5: male at least half the female score).
+  # 0 turns it off. Off by default: on the samples the male score of a
+  # misread male chest was 0.000, the same as on real female breasts.
+  male_score_ratio: 0
+  # Penises take priority: a box of a label in yields_to_male is not
+  # censored when it and a male_priority_labels box scoring at least
+  # male_priority_threshold overlap by male_priority_overlap or more of the
+  # smaller box, so the blur never lands on the penis (and a penis read as
+  # a breast isn't blurred). Other boxes in the image are unaffected. Edge
+  # contact between a breast and a penis (under 0.25 in browsing logs) stays
+  # censored; the threshold keeps weak penis detections (0.26-0.28 in two
+  # censor/ samples) from uncovering real breasts. An empty list disables it.
+  yields_to_male:
+    - FEMALE_BREAST_EXPOSED
+  male_priority_labels:
+    - MALE_GENITALIA_EXPOSED
+  male_priority_threshold: 0.35
+  male_priority_overlap: 0.5
 
 censor:
   # gaussian | pixelate | solid
@@ -164,6 +189,21 @@ images:
   max_detect_frames: 48
   # Animations with more frames than this get the same first-frame treatment.
   max_frames: 600
+  # Pages get a placeholder card over images still loading
+  # placeholder_delay_ms after they come into view (usually waiting their
+  # turn in the censor), removed when the image arrives or fails. Images
+  # with a side under placeholder_min_px on the page get none. Drawn by the
+  # injected script, so only on pages matching video.hosts; a slow network
+  # shows it too, since the page can't tell the two apart.
+  placeholders: true
+  placeholder_delay_ms: 400
+  placeholder_min_px: 48
+  # An image the page gives no size takes no room until it loads. Unless it
+  # sits alone in a sized box (whose box the card then covers), it is held
+  # open at this many pixels on each unsized axis (capped at its container's
+  # width) while it waits, and let go when it loads. 0 leaves such images
+  # without a placeholder.
+  placeholder_reserve_px: 160
 
 data_uris:
   # Scan text bodies for base64 data-URI images (data:image/...;base64,...)
@@ -252,8 +292,44 @@ video:
 
 proxy:
   # Regexes matched against host:port. Matching hosts bypass TLS
-  # interception entirely (mitmproxy ignore_hosts).
-  passthrough_hosts: []
+  # interception entirely (mitmproxy ignore_hosts), so nothing they serve is
+  # censored. Only list hosts that break under interception, carry
+  # credentials or money, or otherwise don't serve explicit content: not
+  # google.com or gstatic.com (Image Search thumbnails), CDNs, social or chat
+  # sites. Add your own hosts with extra_passthrough_hosts rather than
+  # overriding this list, which replaces it.
+  passthrough_hosts:
+    # Chromium background services that ignore the CACertificates policy,
+    # and the binary downloads update.googleapis.com redirects to.
+    - '^update\.googleapis\.com:'
+    - '^optimizationguide-pa\.googleapis\.com:'
+    - '(^|\.)gvt1\.com:'
+    - '^dl\.google\.com:'
+    # Sign-in providers.
+    - '^accounts\.google\.com:'
+    - '^login\.(microsoftonline|live)\.com:'
+    - '^(appleid|idmsa)\.apple\.com:'
+    # Password managers.
+    - '(^|\.)1password\.(com|ca|eu):'
+    - '(^|\.)bitwarden\.(com|eu):'
+    - '(^|\.)lastpass\.com:'
+    # Payment processors (card fields are iframes from these hosts).
+    # PayPal's images come from paypalobjects.com, which stays censored.
+    - '(^|\.)stripe\.(com|network):'
+    - '(^|\.)braintreegateway\.com:'
+    - '(^|\.)paypal\.com:'
+    # Common US banks and card issuers.
+    - '(^|\.)(chase|bankofamerica|wellsfargo|citi|citibank|usbank|capitalone|pnc|truist|tdbank|ally|discover|americanexpress|usaa|regions|citizensbank|53|key|huntington|mtb|sofi|chime|marcus|synchrony)\.com:'
+    - '(^|\.)navyfederal\.org:'
+    # Brokerages and retirement accounts.
+    - '(^|\.)(schwab|fidelity|vanguard|etrade|robinhood|merrilledge|empower)\.com:'
+    # US government, military and education sites.
+    - '\.(gov|mil|edu):'
+    # Identity verification used by government sign-ins.
+    - '(^|\.)id\.me:'
+  # Appended to passthrough_hosts: your bank, health portal, employer or
+  # university sign-in, without repeating the defaults.
+  extra_passthrough_hosts: []
   # Hostname the proxy answers on itself (/health, /inject.js, /video/...).
   # Requests to it are routed to an internal server on internal_port.
   health_host: censor.local
