@@ -453,13 +453,16 @@ function Write-Icon($path) {
 
 # --------------------------------------------------------------- shortcut
 # The taskbar groups windows by AppUserModelID, and Chromium gives every
-# window one of its own: its registered id (Chromium, plus a per-user suffix
-# for a per-user install) and the profile, as shell_integration_win.cc builds
-# it from the user-data-dir's and the profile's directory names (letters,
-# digits and dots kept). Chromium also sets a relaunch command on the window
-# that has no --user-data-dir or proxy, so a pin taken from a running window
-# would open a plain, unproxied Chromium. The shortcuts carry the same id,
-# which makes Windows pin and group through them instead.
+# browser window one of its own (browser_window_property_manager_win.cc):
+# its registered id (Chromium, plus a per-user suffix for a per-user
+# install) and the profile, which shell_integration_win.cc builds from the
+# user-data-dir's and the profile's directory names (letters, digits and
+# dots kept), joined by ShellUtil::BuildAppUserModelId: at most 64
+# characters, so each of the two parts keeps at most 31, a longer one its
+# first 15 and last 16 (the per-user id is 35). With --user-data-dir
+# Chromium's profile shortcut manager is off, so the window gets no relaunch
+# command or icon. The shortcuts carry the same id, so Windows groups the
+# window under them and pins through them, with their flags and icon.
 function Get-ChromiumAppId($chromium) {
     $registered = Get-ItemProperty -ErrorAction SilentlyContinue -Name AppUserModelID -Path `
         'HKCU:\Software\Classes\ChromiumHTM*\Application', 'HKLM:\Software\Classes\ChromiumHTM*\Application' |
@@ -481,7 +484,12 @@ function Get-ChromiumAppId($chromium) {
         }
     }
     $profile = ((Split-Path -Leaf $ProfileDir) + '.Default') -replace '[^A-Za-z0-9.]', ''
-    return "$app.$profile"
+    $max = [math]::Floor((64 - 1) / 2)
+    $parts = foreach ($c in $app, $profile) {
+        if ($c.Length -le $max) { $c }
+        else { $c.Substring(0, [math]::Floor($max / 2)) + $c.Substring($c.Length - [math]::Floor(($max + 1) / 2)) }
+    }
+    return $parts -join '.'
 }
 
 # Writes System.AppUserModel.ID into a .lnk (its property store).
@@ -549,6 +557,20 @@ function Install-Shortcuts($chromium) {
         try { Set-ShortcutAppId $path $appId }
         catch { Warn "could not give $path Chromium's taskbar id ($($_.Exception.Message)); its windows will show as Chromium" }
     }
+    # A taskbar pin is its own copy of the shortcut, made when it was pinned,
+    # so one from an older install has no id (or a wrong one).
+    $pins = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+    $stale = $false
+    foreach ($pin in Get-ChildItem -ErrorAction SilentlyContinue -Path $pins -Filter *.lnk) {
+        $lnk = $shell.CreateShortcut($pin.FullName)
+        if ($lnk.Arguments -notlike "*$ProfileDir*") { continue }
+        $lnk.Arguments = $Shortcuts | Select-Object -First 1 | ForEach-Object { $shell.CreateShortcut($_).Arguments }
+        $lnk.IconLocation = "$IconPath,0"
+        $lnk.Save()
+        try { Set-ShortcutAppId $pin.FullName $appId; $stale = $true }
+        catch { Warn "could not update the taskbar pin $($pin.Name) ($($_.Exception.Message))" }
+    }
+    if ($stale) { Warn "if $BrowserName still shows as a separate Chromium button, unpin it and pin it again from the Start menu" }
 }
 
 # Locks SafeSearch on in Chromium (ForceGoogleSafeSearch), since Google
@@ -580,11 +602,6 @@ function Set-SafeSearchPolicy([bool]$on) {
 # Seeds the profile so the bookmark bar is shown with the admin panel on it.
 # Chromium reads these files when the profile first opens and fills in the
 # ids and checksum itself; an existing profile gets the bookmark inserted.
-# The profile icon too: Chromium shows "Google Profile.ico" from the profile
-# directory on the window's taskbar button (its relaunch icon), and writes
-# its own there on first run unless the icon prefs already say the icon is
-# current (profile_shortcut_manager_win.cc; version 10 as of Chromium 155,
-# a later Chromium that bumps it redraws its own icon, nothing worse).
 function Write-Json($path, $data) {
     $json = $data | ConvertTo-Json -Depth 20
     [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))   # no BOM
@@ -620,25 +637,15 @@ function Seed-Profile {
             Write-Json $bookmarks $data
         }
     }
-    Copy-Item -Force $IconPath (Join-Path $default 'Google Profile.ico')
     if (-not (Test-Path $prefs)) {
-        Write-Json $prefs @{ bookmark_bar = @{ show_on_all_tabs = $true }
-                             profile = @{ icon_version = 10; icon_win11_format = $true } }
+        Write-Json $prefs @{ bookmark_bar = @{ show_on_all_tabs = $true } }
     } else {
         $data = Get-Content -Raw $prefs | ConvertFrom-Json
-        $changed = $false
         if (-not $data.bookmark_bar) { $data | Add-Member -NotePropertyName bookmark_bar -NotePropertyValue ([pscustomobject]@{}) }
         if (-not $data.bookmark_bar.show_on_all_tabs) {
             $data.bookmark_bar | Add-Member -Force -NotePropertyName show_on_all_tabs -NotePropertyValue $true
-            $changed = $true
+            Write-Json $prefs $data
         }
-        if (-not $data.profile) { $data | Add-Member -NotePropertyName profile -NotePropertyValue ([pscustomobject]@{}) }
-        if (-not $data.profile.icon_version) {
-            $data.profile | Add-Member -Force -NotePropertyName icon_version -NotePropertyValue 10
-            $data.profile | Add-Member -Force -NotePropertyName icon_win11_format -NotePropertyValue $true
-            $changed = $true
-        }
-        if ($changed) { Write-Json $prefs $data }
     }
 }
 

@@ -17,11 +17,12 @@ Last updated Oct 19, 2026.
   proxy can't carry HTTP/3, so the launchers bypass the proxy for
   `www.google.com` and the installers lock SafeSearch on with Chromium's
   `ForceGoogleSafeSearch` policy; see `decisions.md`
-- Windows taskbar identity (Oct 19, 2026): the shortcuts carry Chromium's
-  AppUserModelID for the profile and the profile is seeded with our icon, so
-  the Sissy Browser pins and groups as itself, not as Chromium (whose
-  relaunch command from a running window would open an unproxied Chromium);
-  see `decisions.md`. Not yet confirmed on a Windows machine.
+- Windows taskbar identity (Oct 19, 2026): the shortcuts and any existing
+  taskbar pin carry the AppUserModelID Chromium stamps on the profile's
+  windows, built with Chromium's 64-character truncation, so the Sissy
+  Browser groups and pins as itself, not as Chromium; see `decisions.md`.
+  The id was confirmed against a running window on a Windows machine; the
+  grouping itself after the fix is not yet.
 - `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
   sampling and a content-hash cache
 - Female-only selection rule with context thresholds (see `decisions.md`)

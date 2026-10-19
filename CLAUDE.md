@@ -215,9 +215,10 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
   script gets the browser grouped with Chromium in the dock, so for snap
   the installer's entry calls Chromium directly.
 - Windows groups taskbar buttons by AppUserModelID, which Chromium sets per
-  profile (`Chromium[.suffix].profile.Default` here) along with a relaunch
-  command that lacks the proxy flags. The installer stamps that id on the
-  shortcuts and seeds `Google Profile.ico`; see `docs/decisions.md`.
+  profile, capped at 64 characters with each part middle-truncated to 31
+  (`Chromium.UOIRZCR7TPCC576HQBVWZM.profile.Default` on the test machine,
+  not the registered id plus `.profile.Default`). The installer stamps that
+  id on the shortcuts and any taskbar pin; see `docs/decisions.md`.
 - `src/mitmproxy/` holds the CA private key: never commit or share it.
 - Docker Desktop's file sharing keeps showing the container a file's old
   contents after the host renames a new file over it, so `scs-update`
