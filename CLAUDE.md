@@ -191,7 +191,10 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
   browser policies, changing proxy settings or anything needing sudo: give
   the commands and let the user run them.
 - **Commits** only when asked, on `main`, message ending with the
-  `Co-Authored-By` line. There is no remote.
+  `Co-Authored-By` line. Push only when asked, `main` and any release tag
+  to both remotes: `origin` (GitHub, where the installer one-liners are
+  fetched from) and `gitlab`, kept at the same commit. When installer
+  changes need files from a new image, publish the release first.
 
 ## Gotchas
 
