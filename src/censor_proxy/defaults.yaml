@@ -38,22 +38,41 @@ detection:
   # settings; detection keys in config.yaml are kept but ignored. custom
   # uses the detection keys from config.yaml. Picked at the top of the admin
   # panel's Settings tab.
-  preset: strict
-  # Each preset's detection keys and an optional description. The panel
-  # lists what each one censors (its female_labels and unsexed_labels) and
-  # shows the description under that list. Add as many as you like under
-  # detection.presets in config.yaml: they merge with these by name (the
-  # same name replaces one, null removes it), and each shows up as a choice
-  # in the admin panel.
+  preset: only-women
+  # Each preset's detection keys, and an optional label (the name otherwise)
+  # and description. The panel lists what each one censors (its
+  # female_labels and unsexed_labels) and shows the description under that
+  # list. Add as many as you like under detection.presets in config.yaml:
+  # they merge with these by name (the same name replaces one, null removes
+  # it), and each shows up as a choice in the admin panel.
   presets:
-    strict:
+    full:
+      label: Full
+      description: No nudity of any kind, whoever it belongs to.
+      settings:
+        unsexed_labels:
+          - BUTTOCKS_EXPOSED
+          - ANUS_EXPOSED
+          - MALE_GENITALIA_EXPOSED
+        male_context_exempts: false
+        yields_to_male: []
+    cocks-only:
+      label: Cocks only
+      description: Only penises pass. Men's buttocks and anus are censored
+        too.
+      settings:
+        male_context_exempts: false
+    only-women:
+      label: Only Women
+      description: Tries to censor only femme-presenting people. Penises
+        pass, and so do buttocks and anus next to a man.
       settings: {}
-    lax:
-      description: Exposed breasts pass, but still count as female context, so
-        buttocks next to them stay censored.
+    permissive:
+      label: Permissive
       settings:
         female_labels:
           - FEMALE_GENITALIA_EXPOSED
+        unsexed_labels: []
   # Minimum score for a box to be censored. Set low on purpose: false
   # positives are preferred to misses.
   threshold: 0.3

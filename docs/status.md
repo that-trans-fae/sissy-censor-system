@@ -54,7 +54,7 @@ Last updated Oct 19, 2026.
   `/mitmproxy` (needs `docker compose up -d --build`)
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, whitelist (built-in hosts, YouTube
-  included, plus your own domains), censoring levels (strict, lax, custom; any number of
+  included, plus your own domains), censoring levels (Full, Cocks only, Only Women, Permissive, custom; any number of
   presets, each listing what it censors), a Fast/Slow image model switch, every setting editable in custom
   and applied live, and an optional PIN lock that reports wrong entries
   instead of locking out. Checked in a browser against a test container (whitelist, settings,

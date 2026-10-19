@@ -210,7 +210,7 @@
     const dl = (rows) => rows.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", {}, v)]);
     $("info-detection").replaceChildren(...dl([
       ["Status", s.ready ? "Ready" : "Starting"],
-      ["Censoring level", title(s.preset)],
+      ["Censoring level", s.preset_label || title(s.preset)],
       ["Image model", `${s.model}${s.tiling ? ", tiling" : ""}`],
       ["Video", s.video.enabled ? `on, ${s.video.model}` : "off"],
       ["Censor style", s.censor_style],
@@ -549,12 +549,12 @@
         $("cfg-error").textContent = "";
         try {
           renderSettings(await saveSettings({ "detection.preset": o.name }));
-          toast(`Censoring level: ${title(o.name)}`);
+          toast(`Censoring level: ${o.label || title(o.name)}`);
         } catch (err) {
           if (err.status !== 401) $("cfg-error").textContent = err.message;
         }
       },
-    }, h("span", { class: "title", text: title(o.name) }),
+    }, h("span", { class: "title", text: o.label || title(o.name) }),
        o.censors && o.censors.length
          ? h("ul", { class: "censors" }, ...o.censors.map((c) => h("li", { text: c }))) : null,
        o.description ? h("span", { class: "desc", text: o.description }) : null)));

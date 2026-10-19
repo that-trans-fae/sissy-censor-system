@@ -185,3 +185,20 @@ def test_male_priority_disabled_with_empty_list(make_config):
     ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (0, 0, 100, 100)),
                  det("MALE_GENITALIA_EXPOSED", 0.5, (0, 0, 100, 100))], dcfg)
     assert censored(ds) == ["FEMALE_BREAST_EXPOSED"]
+
+
+def test_censoring_levels(make_config):
+    # A man (penis with buttocks beside it) and a woman (breast, vagina)
+    # far apart in one image.
+    scene = [det("MALE_GENITALIA_EXPOSED", 0.6, (0, 0, 40, 40)),
+             det("BUTTOCKS_EXPOSED", 0.6, (40, 0, 80, 80)),
+             det("FEMALE_BREAST_EXPOSED", 0.6, (1000, 0, 60, 60)),
+             det("FEMALE_GENITALIA_EXPOSED", 0.6, (1000, 200, 40, 40))]
+    level = {name: censored(decide(scene, make_config(f"detection: {{preset: {name}}}\n").detection))
+             for name in ("full", "cocks-only", "only-women", "permissive")}
+    assert level["full"] == ["MALE_GENITALIA_EXPOSED", "BUTTOCKS_EXPOSED",
+                             "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED"]
+    assert level["cocks-only"] == ["BUTTOCKS_EXPOSED", "FEMALE_BREAST_EXPOSED",
+                                   "FEMALE_GENITALIA_EXPOSED"]
+    assert level["only-women"] == ["FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED"]
+    assert level["permissive"] == ["FEMALE_GENITALIA_EXPOSED"]

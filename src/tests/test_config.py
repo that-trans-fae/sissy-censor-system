@@ -73,32 +73,39 @@ def test_bad_admin_config_rejected(make_config, text):
 
 
 def test_presets(make_config):
-    strict = make_config("detection: {threshold: 0.9}\n")  # ignored under a preset
-    assert strict.detection.preset == "strict" and strict.detection.threshold == 0.3
-    lax = make_config("detection: {preset: lax}\n")
-    assert lax.detection.female_labels == {"FEMALE_GENITALIA_EXPOSED"}
+    women = make_config("detection: {threshold: 0.9}\n")  # ignored under a preset
+    assert women.detection.preset == "only-women" and women.detection.threshold == 0.3
+    assert women.detection.preset_label == "Only Women"
+    permissive = make_config("detection: {preset: permissive}\n")
+    assert permissive.detection.female_labels == {"FEMALE_GENITALIA_EXPOSED"}
+    assert not permissive.detection.unsexed_labels
+    full = make_config("detection: {preset: full}\n").detection
+    assert "MALE_GENITALIA_EXPOSED" in full.unsexed_labels
+    assert not full.male_context_exempts and not full.yields_to_male
+    cocks = make_config("detection: {preset: cocks-only}\n").detection
+    assert "MALE_GENITALIA_EXPOSED" not in cocks.unsexed_labels and not cocks.male_context_exempts
     custom = make_config("detection: {preset: custom, threshold: 0.9}\n")
     assert custom.detection.threshold == 0.9
     own = make_config("detection:\n  preset: mine\n  presets:\n"
                       "    mine: {description: x, settings: {threshold: 0.7}}\n")
-    assert own.detection.threshold == 0.7
+    assert own.detection.threshold == 0.7 and own.detection.preset_label == ""
 
 
 def test_presets_merge_by_name(make_config, tmp_path):
     from censor_proxy.config import merged
     many = {f"level{i}": {"description": f"level {i}", "settings": {"threshold": 0.3 + i / 100}}
             for i in range(25)}
-    raw = merged({"detection": {"presets": {**many, "lax": None}, "preset": "level24"}})
+    raw = merged({"detection": {"presets": {**many, "permissive": None}, "preset": "level24"}})
     names = list(raw["detection"]["presets"])
-    assert names[0] == "strict" and "lax" not in names and len(names) == 26
+    assert names[0] == "full" and "permissive" not in names and len(names) == 28
     assert raw["detection"]["threshold"] == 0.54
 
 
 @pytest.mark.parametrize("text", [
     "detection: {preset: sparkly}\n",
-    "detection: {presets: {lax: {settings: {nonsense: 1}}}}\n",
+    "detection: {presets: {permissive: {settings: {nonsense: 1}}}}\n",
     "detection: {presets: {custom: {settings: {}}}}\n",
-    "detection: {presets: {lax: {settings: {preset: strict}}}}\n",
+    "detection: {presets: {permissive: {settings: {preset: full}}}}\n",
     "model: {available: [{path: /x.onnx}]}\n",
 ])
 def test_bad_presets_and_models_rejected(make_config, text):

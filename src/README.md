@@ -183,8 +183,15 @@ Tabs:
   - **Image model**: Fast (320n) or Slow (640m), one choice per entry in
     `model.available` (its `label`). The video model has its own dropdown,
     because 640m can't keep up with video.
-  - **Censoring level**: Strict (the detection defaults), Lax (exposed
-    breasts pass) or Custom.
+  - **Censoring level** (`detection.preset`):
+    - **Full**: no nudity of any kind, men's included.
+    - **Cocks only**: only penises pass; men's buttocks and anus are
+      censored too.
+    - **Only Women** (the default): tries to censor only femme-presenting
+      people. It's the detection defaults, the rules in `decide()` that
+      `docs/decisions.md` tunes.
+    - **Permissive**: only vaginas are censored.
+    - **Custom**.
 
   Custom shows every option in `defaults.yaml` with its comment, starting
   from the level you had; the other levels hide them and fix the detection
@@ -193,18 +200,19 @@ Tabs:
   "restart" (ports, the video cache and slots) take effect after
   `docker compose restart`. Add as many levels as
   you like under `detection.presets` in `config/config.yaml`, each with the
-  detection `settings` it changes and an optional `description`. They merge
-  with the built-in ones by name (`lax: null` removes one), and each appears
-  as a choice listing what it censors (its `female_labels` and
-  `unsexed_labels`), with the description under the list:
+  detection `settings` it changes and an optional `label` and `description`.
+  They merge with the built-in ones by name (`permissive: null` removes one),
+  and each appears as a choice listing what it censors (its `female_labels`
+  and `unsexed_labels`), with the description under the list:
 
   ```yaml
   detection:
     presets:
-      genitals-only:
+      topless:
+        label: Topless OK
+        description: Breasts pass, but still count as female context.
         settings:
           female_labels: [FEMALE_GENITALIA_EXPOSED]
-          unsexed_labels: []
   ```
 
 - **PIN lock**: an optional 4-12 digit PIN, stored hashed as

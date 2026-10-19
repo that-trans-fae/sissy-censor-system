@@ -93,6 +93,7 @@ class CensorAddon:
             "counts": dict(self.stats),
             "model": cfg.model.name_for(cfg.model.path, cfg.model.resolution),
             "preset": cfg.detection.preset,
+            "preset_label": cfg.detection.preset_label,
             "resolution": cfg.model.resolution,
             "tiling": cfg.model.tiling,
             "cache_entries": self.censor.cached() if self.censor else 0,

@@ -338,12 +338,14 @@ def test_help_text_from_defaults():
 
 def test_presets_lock_detection_and_seed_custom(panel):
     client, app, _, path = panel
-    r, view = client("POST", "/admin/api/config", {"set": {"detection.preset": "lax"}})
-    assert r.status == 200 and view["preset"]["active"] == "lax"
-    assert [o["name"] for o in view["preset"]["options"]] == ["strict", "lax"]
-    assert app.cfg.detection.preset == "lax"
+    r, view = client("POST", "/admin/api/config", {"set": {"detection.preset": "permissive"}})
+    assert r.status == 200 and view["preset"]["active"] == "permissive"
+    assert [o["name"] for o in view["preset"]["options"]] == [
+        "full", "cocks-only", "only-women", "permissive"]
+    assert [o["label"] for o in view["preset"]["options"]] == [
+        "Full", "Cocks only", "Only Women", "Permissive"]
+    assert app.cfg.detection.preset == "permissive"
     assert "FEMALE_BREAST_EXPOSED" not in app.cfg.detection.female_labels
-    assert "FEMALE_BREAST_EXPOSED" in app.cfg.detection.female_context_labels
 
     # A preset owns the detection keys.
     r, body = client("POST", "/admin/api/config", {"set": {"detection.threshold": 0.5}})
@@ -356,8 +358,8 @@ def test_presets_lock_detection_and_seed_custom(panel):
     r, _ = client("POST", "/admin/api/config", {"set": {"detection.threshold": 0.5}})
     assert r.status == 200 and app.cfg.detection.threshold == 0.5
 
-    # Back to strict: the custom values stay in the file but don't apply.
-    client("POST", "/admin/api/config", {"set": {"detection.preset": "strict"}})
+    # Back to only-women: the custom values stay in the file but don't apply.
+    client("POST", "/admin/api/config", {"set": {"detection.preset": "only-women"}})
     assert app.cfg.detection.threshold == 0.3
     assert "FEMALE_BREAST_EXPOSED" in app.cfg.detection.female_labels
     assert "threshold: 0.5" in path.read_text()
@@ -370,15 +372,22 @@ def test_presets_list_what_they_censor(panel):
     client, *_ = panel
     _, view = client("GET", "/admin/api/config")
     censors = {o["name"]: o["censors"] for o in view["preset"]["options"]}
-    assert censors["strict"] == ["Exposed breasts", "Exposed genitalia",
-                                 "Exposed buttocks", "Exposed anus"]
-    assert censors["lax"] == ["Exposed genitalia", "Exposed buttocks", "Exposed anus"]
+    assert censors["full"] == ["Exposed breasts", "Exposed vaginas", "Exposed buttocks",
+                               "Exposed anus", "Exposed penises"]
+    assert censors["cocks-only"] == ["Exposed breasts", "Exposed vaginas",
+                                     "Exposed buttocks", "Exposed anus"]
+    assert censors["only-women"] == ["Exposed breasts", "Exposed vaginas",
+                                     "Exposed buttocks, except next to a man",
+                                     "Exposed anus, except next to a man"]
+    assert censors["permissive"] == ["Exposed vaginas"]
 
 
 def test_label_names():
     assert admin_mod.label_name("FEMALE_BREAST_COVERED") == "Covered breasts"
     assert admin_mod.label_name("FEET_EXPOSED") == "Exposed feet"
     assert admin_mod.label_name("FACE_FEMALE") == "Face"
+    assert admin_mod.label_name("MALE_GENITALIA_EXPOSED") == "Exposed penises"
+    assert admin_mod.label_name("BELLY_EXPOSED") == "Exposed belly"
 
 
 def test_any_number_of_presets_offered(panel):
@@ -389,7 +398,7 @@ def test_any_number_of_presets_offered(panel):
     client("POST", "/admin/api/config/reload", {})
     _, view = client("GET", "/admin/api/config")
     names = [o["name"] for o in view["preset"]["options"]]
-    assert names[:2] == ["strict", "lax"] and len(names) == 14
+    assert names[:4] == ["full", "cocks-only", "only-women", "permissive"] and len(names) == 16
     r, view = client("POST", "/admin/api/config", {"set": {"detection.preset": "level11"}})
     assert r.status == 200 and app.cfg.detection.threshold == 0.41
     assert "level11" in path.read_text() and "level0:" in path.read_text()

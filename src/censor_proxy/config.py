@@ -56,6 +56,8 @@ class ModelConfig:
 @dataclass(frozen=True)
 class DetectionConfig:
     preset: str
+    # The preset's label, or "" for custom or a preset without one.
+    preset_label: str
     threshold: float
     label_thresholds: dict[str, float]
     corroborated_threshold: float
@@ -316,6 +318,7 @@ def _build(raw: dict[str, Any]) -> Config:
         "model": ModelConfig(**{**m, "available": tuple(available)}),
         "detection": DetectionConfig(
             preset=str(d["preset"]),
+            preset_label=str(((d.get("presets") or {}).get(d["preset"]) or {}).get("label") or ""),
             threshold=float(d["threshold"]),
             label_thresholds={str(k): float(v) for k, v in (d["label_thresholds"] or {}).items()},
             corroborated_threshold=float(d["corroborated_threshold"]),
