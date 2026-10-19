@@ -67,8 +67,8 @@ chromium --user-data-dir=$HOME/snap/chromium/common/censor-test --proxy-server=1
 ```
 
 Chromium's component updater ignores the policy, so `update.googleapis.com`
-and `optimizationguide-pa.googleapis.com` are in the passthrough list in
-`config/config.yaml`.
+and `optimizationguide-pa.googleapis.com` are in the default passthrough list
+(`proxy.passthrough_hosts`).
 
 ### Firefox (snap)
 
@@ -80,6 +80,17 @@ Edit `config/config.yaml` and restart the container. It only needs the keys
 you change; every option and its default is documented in
 [`censor_proxy/defaults.yaml`](censor_proxy/defaults.yaml). Unknown keys are
 rejected at startup.
+
+### Passthrough hosts
+
+Hosts matching `proxy.passthrough_hosts` bypass TLS interception, so nothing
+they serve is censored. The defaults cover Chromium's updaters, sign-in
+providers, password managers, payment processors, common US banks and
+brokerages, and every `.gov`, `.mil` and `.edu` site. Add your own (your bank,
+health portal, employer or university sign-in) with
+`proxy.extra_passthrough_hosts`, which is appended to the defaults; setting
+`passthrough_hosts` itself replaces them. Only add hosts that never serve
+images you'd want censored.
 
 The detection log is `logs/detections.jsonl`. At `logging.level: info` it
 records hostnames; `debug` adds full URLs, every image scanned, and every

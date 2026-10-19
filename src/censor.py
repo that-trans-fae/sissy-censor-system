@@ -49,8 +49,8 @@ class CensorAddon:
         # Lazy upstream connections, so CONNECT to the internal host doesn't
         # fail trying to reach a real censor.local.
         ctx.options.update(connection_strategy="lazy")
-        if self.cfg.proxy.passthrough_hosts:
-            ctx.options.update(ignore_hosts=list(self.cfg.proxy.passthrough_hosts))
+        if self.cfg.proxy.ignore_hosts:
+            ctx.options.update(ignore_hosts=list(self.cfg.proxy.ignore_hosts))
         log.info("censor proxy ready: model=%s style=%s", self.cfg.model.path or "320n (bundled)",
                  self.cfg.censor.style)
 

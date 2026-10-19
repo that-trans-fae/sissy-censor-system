@@ -26,6 +26,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from censor_proxy.config import load_config  # noqa: E402
+from censor_proxy.detection import counterpart_scores  # noqa: E402
 from censor_proxy.imaging import Censor  # noqa: E402
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -36,6 +37,12 @@ def frame_rgb(data: bytes, index: int) -> np.ndarray:
     im = Image.open(io.BytesIO(data))
     im.seek(index)
     return np.array(im.convert("RGB"))
+
+
+def vs_text(detection, cfg) -> str:
+    """The box's opposite-sex counterpart score, e.g. "vs MALE_BREAST 0.02"."""
+    return " ".join(f"vs {label.removesuffix('_EXPOSED')} {score:.2f}"
+                    for label, score in counterpart_scores(detection, cfg.detection).items())
 
 
 def annotate(rgb: np.ndarray, decisions) -> np.ndarray:
@@ -90,12 +97,15 @@ def main() -> None:
             "action": result.action,
             **({"frame": frame, "frames": result.frames} if result.frames > 1 else {}),
             "elapsed_ms": round(result.elapsed_ms),
-            "detections": [{**d.detection.as_dict(), "censor": d.censor, "why": d.reason}
+            "detections": [{**d.detection.as_dict(), "censor": d.censor, "why": d.reason,
+                            **({"vs": vs} if (vs := counterpart_scores(d.detection, cfg.detection))
+                               else {})}
                            for d in decisions],
         })
         table = "".join(
             f"<tr class={'c' if d.censor else 'p'}><td>{'censor' if d.censor else 'pass'}</td>"
             f"<td>{d.detection.label}</td><td>{d.detection.score:.2f}</td>"
+            f"<td>{vs_text(d.detection, cfg)}</td>"
             f"<td>{html.escape(d.reason)}</td></tr>"
             for d in sorted(decisions, key=lambda d: (not d.censor, -d.detection.score)))
         rows.append(

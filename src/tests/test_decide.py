@@ -1,6 +1,6 @@
 from conftest import det
 
-from censor_proxy.detection import decide
+from censor_proxy.detection import Box, Detection, counterpart_scores, decide
 
 
 def censored(decisions):
@@ -115,3 +115,73 @@ def test_weak_female_must_overlap_to_override(cfg):
                  det("MALE_GENITALIA_EXPOSED", 0.7, (100, 0, 50, 50)),
                  det("FACE_FEMALE", 0.26, (130, 0, 30, 30))], cfg.detection)
     assert censored(ds) == []
+
+
+def breast(female, male, x=0):
+    return Detection("FEMALE_BREAST_EXPOSED", female, Box(x, 0, 100, 100),
+                     {"FEMALE_BREAST_EXPOSED": female, "MALE_BREAST_EXPOSED": male})
+
+
+def test_male_score_ratio_off_by_default(cfg):
+    [d] = decide([breast(0.6, 0.55)], cfg.detection)
+    assert d.censor
+
+
+def test_male_score_ratio_passes_box_the_model_also_scores_male(make_config):
+    dcfg = make_config("detection: {threshold: 0.5, label_thresholds: {}, male_score_ratio: 0.5}\n").detection
+    a, b = decide([breast(0.6, 0.35), breast(0.6, 0.25, x=1000)], dcfg)
+    assert not a.censor and a.reason == "MALE_BREAST_EXPOSED scores 0.35"
+    assert b.censor
+    # Detections without class scores (male score unknown) are unaffected.
+    [c] = decide([det("FEMALE_BREAST_EXPOSED", 0.6)], dcfg)
+    assert c.censor
+
+
+def test_counterpart_scores_both_directions(cfg):
+    assert counterpart_scores(breast(0.6, 0.123456), cfg.detection) == {"MALE_BREAST_EXPOSED": 0.123}
+    male = Detection("MALE_BREAST_EXPOSED", 0.5, Box(0, 0, 9, 9), {"FEMALE_BREAST_EXPOSED": 0.2})
+    assert counterpart_scores(male, cfg.detection) == {"FEMALE_BREAST_EXPOSED": 0.2}
+    assert counterpart_scores(det("FEMALE_BREAST_EXPOSED"), cfg.detection) == {}
+    assert counterpart_scores(det("FACE_FEMALE"), cfg.detection) == {}
+
+
+def test_breast_covering_a_penis_passes(cfg):
+    ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (0, 0, 100, 100)),
+                 det("MALE_GENITALIA_EXPOSED", 0.5, (40, 40, 80, 80)),
+                 det("FEMALE_GENITALIA_EXPOSED", 0.8, (500, 500, 50, 50))], cfg.detection)
+    assert censored(ds) == ["FEMALE_GENITALIA_EXPOSED"]
+    assert ds[0].reason == "covers MALE_GENITALIA_EXPOSED 0.50"
+
+
+def test_breast_inside_a_penis_box_passes(cfg):
+    ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (50, 50, 20, 20)),
+                 det("MALE_GENITALIA_EXPOSED", 0.5, (0, 0, 200, 300))], cfg.detection)
+    assert censored(ds) == []
+
+
+def test_breast_touching_a_penis_stays_censored(cfg):
+    # Overlap is 20% of the smaller box.
+    ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (0, 0, 100, 100)),
+                 det("MALE_GENITALIA_EXPOSED", 0.5, (80, 0, 100, 100))], cfg.detection)
+    assert censored(ds) == ["FEMALE_BREAST_EXPOSED"]
+
+
+def test_weak_penis_does_not_uncover_breast(cfg):
+    ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (0, 0, 100, 100)),
+                 det("MALE_GENITALIA_EXPOSED", 0.28, (20, 20, 50, 50))], cfg.detection)
+    assert censored(ds) == ["FEMALE_BREAST_EXPOSED"]
+
+
+def test_yielding_breast_does_not_corroborate_its_pair(cfg):
+    # The weak breast would pass 0.35 if the covering one corroborated it.
+    ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (0, 0, 100, 100)),
+                 det("MALE_GENITALIA_EXPOSED", 0.5, (0, 0, 100, 100)),
+                 det("FEMALE_BREAST_EXPOSED", 0.4, (110, 0, 100, 100))], cfg.detection)
+    assert censored(ds) == []
+
+
+def test_male_priority_disabled_with_empty_list(make_config):
+    dcfg = make_config("detection: {yields_to_male: []}\n").detection
+    ds = decide([det("FEMALE_BREAST_EXPOSED", 0.8, (0, 0, 100, 100)),
+                 det("MALE_GENITALIA_EXPOSED", 0.5, (0, 0, 100, 100))], dcfg)
+    assert censored(ds) == ["FEMALE_BREAST_EXPOSED"]
