@@ -58,7 +58,11 @@ function Kv-Set($file, $key, $value) {
 
 function Version-Of($image) {
     if (-not $image) { return '' }
-    $v = (docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' $image 2>$null) -replace '[^A-Za-z0-9._+-]', ''
+    # No quotes inside the template: Windows PowerShell strips them from a
+    # native command's arguments.
+    $labels = docker image inspect -f '{{json .Config.Labels}}' $image 2>$null
+    $v = ''
+    if ($labels) { $v = "$(($labels | ConvertFrom-Json).'org.opencontainers.image.version')" -replace '[^A-Za-z0-9._+-]', '' }
     if ($v -and $v -ne 'dev') { return $v }
     $d = ($image -split '@sha256:')[-1]
     return $d.Substring(0, [Math]::Min(12, $d.Length))

@@ -46,6 +46,7 @@ $CaPem = Join-Path $ScsDir 'mitmproxy\mitmproxy-ca-cert.pem'
 $UpdateTask = 'Sissy Censor System update'
 $DockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
 $ChromiumWingetId = 'Hibbiki.Chromium'
+$ChromiumMinVersion = 134   # the profile certificate store (ServerCertificate)
 $BrowserHome = Join-Path $env:LOCALAPPDATA 'SissyBrowser'
 $ProfileDir = Join-Path $BrowserHome 'profile'
 $IconPath = Join-Path $BrowserHome 'sissy-browser.ico'
@@ -195,8 +196,10 @@ function Set-Gpu {
 }
 
 function Start-Proxy {
-    $other = docker ps --filter "publish=$ProxyPort" --format '{{.Names}} {{.Label "com.docker.compose.project"}}' |
-        Where-Object { ($_ -split ' ')[1] -ne 'scs' } | Select-Object -First 1
+    # No quotes inside the template: Windows PowerShell strips them from a
+    # native command's arguments.
+    $other = docker ps --filter "publish=$ProxyPort" --format '{{.Names}} {{.Labels}}' |
+        Where-Object { $_ -notmatch 'com\.docker\.compose\.project=scs(,|$)' } | Select-Object -First 1
     if ($other) { $name = ($other -split ' ')[0]; Die "another container ($name) holds port $ProxyPort; stop it (docker stop $name) and rerun" }
     Log 'Starting the proxy'
     Push-Location $ScsDir
@@ -260,14 +263,26 @@ function Find-Chromium {
     return $null
 }
 
+function Chromium-Version($exe) {
+    [version]((Get-Item $exe).VersionInfo.ProductVersion -replace '[^0-9.].*$')
+}
+# The profile certificate store needs Chromium 134; an older one that is
+# already installed is updated (winget install upgrades what it finds).
 function Install-Chromium {
     $exe = Find-Chromium
     if (-not $exe) {
         Log 'Installing Chromium'
         Winget-Install $ChromiumWingetId
         $exe = Find-Chromium
+    } elseif ((Chromium-Version $exe).Major -lt $ChromiumMinVersion) {
+        Log "Updating Chromium $(Chromium-Version $exe) at $exe ($ChromiumMinVersion or newer is needed)"
+        Winget-Install $ChromiumWingetId
+        $exe = Find-Chromium
     }
     if (-not $exe) { Die 'could not find chrome.exe after installing Chromium; set SCS_CHROMIUM_EXE to its path' }
+    if ((Chromium-Version $exe).Major -lt $ChromiumMinVersion) {
+        Die "Chromium $(Chromium-Version $exe) at $exe is too old ($ChromiumMinVersion or newer is needed); update it or set SCS_CHROMIUM_EXE to a newer one"
+    }
     return $exe
 }
 
@@ -305,7 +320,7 @@ function Trust-CaInProfile($chromium) {
         Start-Process -Wait -WindowStyle Hidden -FilePath $chromium -ArgumentList @(
             "--user-data-dir=`"$ProfileDir`"", '--headless=new', '--disable-gpu', '--no-first-run', '--dump-dom', 'about:blank')
     }
-    if (-not (Test-Path $db)) { Die "Chromium did not create $db (Chromium 134 or newer is needed)" }
+    if (-not (Test-Path $db)) { Die "Chromium $(Chromium-Version $chromium) at $chromium did not create $db" }
     Log "Trusting the proxy CA in the $BrowserName profile"
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CaPem)
     $der = $cert.RawData
