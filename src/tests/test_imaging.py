@@ -133,6 +133,42 @@ def test_animated_gif_roundtrip_and_frame_sampling(make_config):
     assert changed == [False, True, True, True, False]
 
 
+def slide(seed):
+    """A noise frame at its own brightness: unlike any other slide."""
+    rng = np.random.default_rng(seed)
+    base = 40 * (seed % 6)
+    return Image.fromarray(rng.integers(base, base + 40, (160, 200, 3), dtype=np.uint8))
+
+
+def test_slideshow_scans_every_frame(make_config):
+    # A slideshow ad (1033687811, Oct 19, 2026) changes picture every frame;
+    # frames 1 and 3 borrowed the boxes of 0, 2 and 4 and showed breasts.
+    cfg = make_config("images: {size_floor_bytes: 0, min_side_px: 1, frame_step: 2}\n")
+    frames = [slide(i) for i in range(5)]
+    original = encode(frames[0], "WEBP", lossless=True, save_all=True,
+                      append_images=frames[1:], duration=2000)
+    calls = []
+
+    def detect(bgr):
+        calls.append(len(calls))
+        return [det("FEMALE_BREAST_EXPOSED", box=BOX)] if len(calls) == 4 else []
+
+    result = Censor(cfg, FakeDetector(detect)).censor_bytes(original)
+    assert len(calls) == 5
+    assert [i for i, ds in result.frame_decisions if any(d.censor for d in ds)] == [3]
+
+
+def test_scene_cuts_stay_within_budget(make_config):
+    cfg = make_config("images: {size_floor_bytes: 0, min_side_px: 1, max_detect_frames: 4}\n")
+    frames = [slide(i) for i in range(12)]
+    original = encode(frames[0], "WEBP", lossless=True, save_all=True,
+                      append_images=frames[1:], duration=100)
+    fake = FakeDetector()
+    result = Censor(cfg, fake).censor_bytes(original)
+    sampled = [i for i, _ in result.frame_decisions]
+    assert fake.calls == 4 and sampled[0] == 0 and sampled[-1] == 11
+
+
 def test_fail_closed_blurs_everything(cfg):
     original = encode(noise(), "PNG")
     result = Censor(cfg, FakeDetector()).fail_closed(original, "timeout")

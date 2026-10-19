@@ -232,6 +232,12 @@ images:
   # use a larger step so no more than max_detect_frames are scanned.
   frame_step: 2
   max_detect_frames: 48
+  # Frames that differ from the one before by more than this (mean absolute
+  # difference of 32x32 grayscale thumbnails, 0-255) are scene cuts and
+  # always scanned, within max_detect_frames: a slideshow ad changes picture
+  # every frame, so neighbouring boxes don't fit. Smooth motion stays under
+  # ~20. 0 turns it off.
+  scene_cut_threshold: 20
   # Animations with more frames than this get the same first-frame treatment.
   max_frames: 600
   # Detection workers kept for still images. Animated images take seconds

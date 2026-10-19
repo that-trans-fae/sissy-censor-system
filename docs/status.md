@@ -44,6 +44,9 @@ Last updated Oct 19, 2026.
   instead of holding a worker, and animations leave `images.still_workers`
   workers free for still images (found on redtube.com, where thumbnails
   waited behind Reddit GIFs from another tab)
+- Scene cuts in animations (Oct 19, 2026): frames that cut to a new picture
+  are always scanned instead of borrowing their neighbours' boxes (a
+  slideshow ad showed breasts on its unscanned frames)
 - Page-facing hardening (Oct 19, 2026): no CORS on `/health` and
   `/inject.js`, job endpoints answer only allowlisted origins, no named
   global or script tag left in the page, Referer from the `Origin` header,

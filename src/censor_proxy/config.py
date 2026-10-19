@@ -125,6 +125,7 @@ class ImagesConfig:
     max_decoded_bytes: int
     frame_step: int
     max_detect_frames: int
+    scene_cut_threshold: float
     max_frames: int
     still_workers: int
     placeholders: bool
@@ -447,6 +448,8 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("images.frame_step must be >= 1")
     if cfg.images.max_detect_frames < 2:
         raise ConfigError("images.max_detect_frames must be >= 2")
+    if cfg.images.scene_cut_threshold < 0:
+        raise ConfigError("images.scene_cut_threshold must be >= 0")
     if cfg.images.still_workers < 0:
         raise ConfigError("images.still_workers must be >= 0")
     if min(cfg.images.placeholder_delay_ms, cfg.images.placeholder_min_px,

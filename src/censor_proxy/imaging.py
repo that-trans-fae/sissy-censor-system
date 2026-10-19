@@ -208,11 +208,7 @@ class Censor:
 
     def _detect_frames(self, frames: list[np.ndarray],
                        deadline: float | None = None) -> list[tuple[int, list[Decision]]]:
-        icfg = self.cfg.images
-        step = max(icfg.frame_step, math.ceil(len(frames) / icfg.max_detect_frames))
-        sampled = list(range(0, len(frames), step))
-        if sampled[-1] != len(frames) - 1:
-            sampled.append(len(frames) - 1)
+        sampled = _sample_indices(frames, self.cfg.images)
         seen: dict[bytes, list[Decision]] = {}
         out = []
         for i in sampled:
@@ -253,6 +249,29 @@ def is_animated(data: bytes) -> bool:
             return bool(getattr(probe, "is_animated", False))
     except Exception:
         return False
+
+
+def _sample_indices(frames: list[np.ndarray], icfg) -> list[int]:
+    """Frames to run detection on: every `frame_step`th, the last, and every
+    scene cut (a frame unlike the one before it). Skipped frames borrow their
+    neighbours' boxes, which only fits when the picture moves between them; a
+    slideshow GIF changes picture every frame. At most `max_detect_frames`."""
+    n, budget = len(frames), icfg.max_detect_frames
+    cuts = []
+    if icfg.scene_cut_threshold > 0 and n > 1:
+        thumbs = [_thumb(f) for f in frames]
+        cuts = [i for i in range(1, n)
+                if np.abs(thumbs[i] - thumbs[i - 1]).mean() > icfg.scene_cut_threshold]
+    step = max(icfg.frame_step, math.ceil(n / max(1, budget - len(cuts))))
+    sampled = sorted(set(range(0, n, step)) | {n - 1} | set(cuts))
+    if len(sampled) > budget:  # more cuts than the budget: spread it evenly
+        sampled = sorted({sampled[round(k * (len(sampled) - 1) / (budget - 1))] for k in range(budget)})
+    return sampled
+
+
+def _thumb(frame: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(np.ascontiguousarray(frame[..., :3]), cv2.COLOR_RGB2GRAY)
+    return cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA).astype(np.int16)
 
 
 def _boxes_per_frame(n: int, frame_decisions: list[tuple[int, list[Decision]]]) -> list[list[Box]]:
