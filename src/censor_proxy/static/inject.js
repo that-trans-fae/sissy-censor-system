@@ -127,12 +127,12 @@
       button.secondary svg { width: 15px; height: 15px; }
       button:focus-visible { outline: 2px solid var(--censor-fg); outline-offset: 2px; }
       .bar { width: 55%; height: 4px; border-radius: 2px; background: var(--censor-track); overflow: hidden; }
-      .bar > i { display: block; height: 100%; width: 0; background: var(--censor-accent); transition: width .3s; }
-      /* No duration to measure against (streams, live): a sliding segment. */
-      .bar.indeterminate > i { width: 35% !important; transition: none; animation: censor-slide 1.4s ease-in-out infinite; }
+      /* Always indeterminate: playback starts with the first segment, so a
+         fill would never get past 0. */
+      .bar > i { display: block; height: 100%; width: 35%; background: var(--censor-accent); animation: censor-slide 1.4s ease-in-out infinite; }
       @keyframes censor-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
       @media (prefers-reduced-motion: reduce) {
-        .bar.indeterminate > i { width: 100% !important; animation: censor-pulse 2s ease-in-out infinite; }
+        .bar > i { width: 100%; animation: censor-pulse 2s ease-in-out infinite; }
         @keyframes censor-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
       }
       video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
@@ -515,11 +515,6 @@
     card.append(...(iconName ? [badge, msg, detail, button, bar, brand] : [brand, badge, msg, detail, button, bar]),
                 ...(state.player ? [state.player] : []));
     bar.hidden = mode !== "preparing";
-    // Indeterminate until a job status says how long the video is.
-    if (mode === "preparing") {
-      bar.classList.add("indeterminate");
-      bar.firstChild.style.width = "0";
-    }
     button.hidden = !(mode === "idle" || failed);
     button.className = failed ? "secondary" : "";
     button.replaceChildren(icon(failed ? "retry" : "play"), failed ? BRAND.strings.retry : BRAND.strings.play);
@@ -968,9 +963,6 @@
       while (!job.ready) {
         if (job.state === "error") throw new Error(job.error);
         state.msg.textContent = job.state === "queued" ? BRAND.strings.queued : BRAND.strings.preparing;
-        state.bar.classList.toggle("indeterminate", !job.duration);
-        if (job.duration) state.bar.firstChild.style.width =
-          Math.min(100, 100 * job.seconds_done / job.duration) + "%";
         await new Promise((r) => setTimeout(r, 1000));
         job = await (await origFetch.call(window, statusUrl(state))).json();
       }
