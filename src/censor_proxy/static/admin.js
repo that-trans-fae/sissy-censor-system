@@ -265,6 +265,7 @@
       return;
     }
     renderWhitelist(view);
+    renderPassthrough(view);
   }
 
   function renderWhitelist(view) {
@@ -311,6 +312,70 @@
       e.target.checked = !e.target.checked;
       if (err.status !== 401) $("wl-error").textContent = err.message;
     }
+  });
+
+  // ---- never intercepted (proxy.passthrough_hosts) ----------------------
+
+  // Patterns are regexes on host:port. Domains added here are written as
+  // "(^|\.)example\.com:", which covers subdomains.
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const domainPattern = (d) => `(^|\\.)${escapeRegex(d)}:`;
+
+  // A pattern as the domains it covers, for display: one alternation group
+  // is expanded ("login\.(live|microsoftonline)\.com:" is two domains).
+  // Anything else regex-like is shown as written.
+  function readable(pattern) {
+    const s = pattern.replace(/^\(\^\|\\\.\)/, "").replace(/^\^/, "").replace(/:$/, "");
+    const m = s.match(/^([^()|]*)\(([^()]*)\)([^()|]*)$/);
+    const parts = m ? m[2].split("|").map((a) => m[1] + a + m[3]) : [s];
+    const plain = parts.map((p) => p.replace(/\\\./g, "."));
+    return plain.every((p) => /^[a-z0-9.-]+$/i.test(p)) ? plain : [pattern];
+  }
+
+  function passedThrough(view, domain) {
+    const all = [...(setting(view, "proxy", "passthrough_hosts").value || []),
+                 ...(setting(view, "proxy", "extra_passthrough_hosts").value || [])];
+    return all.some((p) => { try { return new RegExp(p, "i").test(`${domain}:443`); } catch (_) { return false; } });
+  }
+
+  function renderPassthrough(view) {
+    const builtin = (setting(view, "proxy", "passthrough_hosts").value || []).flatMap(readable);
+    const extra = setting(view, "proxy", "extra_passthrough_hosts").value || [];
+    const editable = view.editable;
+    $("pt-builtin-list").replaceChildren(...builtin.map((d) => h("li", { text: d })));
+    $("pt-builtin-count").textContent = `(${builtin.length})`;
+    $("pt-list").replaceChildren(...extra.map((p) => {
+      const label = readable(p).join(", ");
+      return h("li", {}, label, h("button", {
+        type: "button", title: `Remove ${label}`, "aria-label": `Remove ${label}`, text: "×",
+        disabled: !editable, onclick: () => updatePassthrough(extra.filter((x) => x !== p), `${label} removed`) }));
+    }));
+    $("pt-empty").hidden = extra.length > 0;
+    for (const el of $("pt-form").elements) el.disabled = !editable;
+    if (!editable) $("pt-error").textContent = view.path
+      ? `${view.path} isn't writable, so this list can't be changed here.`
+      : "No config file is set (CENSOR_CONFIG), so this list can't be changed here.";
+  }
+
+  async function updatePassthrough(patterns, message) {
+    $("pt-error").textContent = "";
+    try {
+      renderPassthrough(await saveSettings({ "proxy.extra_passthrough_hosts": patterns }));
+      toast(message);
+    } catch (err) {
+      if (err.status !== 401) $("pt-error").textContent = err.message;
+    }
+  }
+
+  $("pt-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const domain = normalizeDomain($("pt-input").value);
+    if (!domain) return;
+    if (!/^[a-z0-9.-]+$/.test(domain)) { $("pt-error").textContent = `${domain} isn't a domain.`; return; }
+    if (passedThrough(cfgView, domain)) { $("pt-error").textContent = `${domain} is already never intercepted.`; return; }
+    const extra = setting(cfgView, "proxy", "extra_passthrough_hosts").value || [];
+    await updatePassthrough([...extra, domainPattern(domain)], `${domain} won't be intercepted`);
+    if (!$("pt-error").textContent) $("pt-input").value = "";
   });
 
   // ---- detections -------------------------------------------------------

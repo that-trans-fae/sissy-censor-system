@@ -84,6 +84,28 @@
           images. This includes any third-party images or ads on those pages.</span>
       </label>
     </div>
+    <div class="card">
+      <h2>Never intercepted</h2>
+      <p class="muted">Connections to these hosts aren't decrypted at all, so the proxy never sees
+        their logins or account pages, and nothing from them is censored. Use it for banks,
+        health portals and sign-in pages; use the whitelist above for sites you just don't want
+        scanned. An entry covers its subdomains too.</p>
+      <form id="pt-form" class="row">
+        <input id="pt-input" type="text" placeholder="mybank.com" aria-label="Domain"
+               autocomplete="off" spellcheck="false" required>
+        <button type="submit" class="primary">Add</button>
+      </form>
+      <p class="error" id="pt-error" role="alert"></p>
+      <ul class="chips" id="pt-list"></ul>
+      <p class="muted" id="pt-empty" hidden>None added. The built-in list below still applies.</p>
+      <details class="builtin" id="pt-builtin" open>
+        <summary>Built in <span class="count" id="pt-builtin-count"></span></summary>
+        <p class="muted small">Browser updaters, sign-in providers, password managers, payment
+          processors, common US banks and brokerages, and every .gov, .mil and .edu site
+          (<span class="mono">proxy.passthrough_hosts</span>).</p>
+        <ul class="chips readonly" id="pt-builtin-list"></ul>
+      </details>
+    </div>
   </section>
 
   <section id="detections" class="tab" hidden>

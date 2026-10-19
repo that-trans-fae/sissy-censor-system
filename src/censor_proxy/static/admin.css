@@ -145,6 +145,10 @@ button:disabled { opacity: .5; cursor: default; }
   border: 0; background: none; color: var(--muted); padding: 0 .35rem; font-size: 1.1rem; line-height: 1;
 }
 .chips button:hover { color: var(--danger); }
+.chips.readonly li { padding: .3rem .8rem; background: none; border: 1px solid var(--line); }
+details.builtin { margin-top: 1.4rem; }
+details.builtin > summary { cursor: pointer; font-weight: 600; }
+details.builtin .count { color: var(--muted); font-weight: 400; font-size: .85rem; }
 
 /* -- tables ------------------------------------------------------------ */
 .table-wrap { overflow-x: auto; margin: 0 -1.4rem; padding: 0 1.4rem; }

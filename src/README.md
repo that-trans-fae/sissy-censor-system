@@ -146,7 +146,9 @@ Tabs:
   what a whitelisted page loads passes too (matched by `Referer`), so
   YouTube's thumbnails from `i.ytimg.com` aren't scanned. Turn that off with
   the checkbox (`whitelist.match_referer`). `youtube.com` is in the example
-  config.
+  config. Below it, **Never intercepted** lists the
+  [passthrough hosts](#passthrough-hosts): the built-in ones (read-only) and
+  yours (`proxy.extra_passthrough_hosts`), which you add as plain domains.
 - **Detections**: the latest entries of the detection log, filterable. No
   images, just hosts, labels and scores.
 - **Video**: video jobs with their progress, and a button to cancel them.
