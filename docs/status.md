@@ -73,8 +73,11 @@ Last updated Oct 19, 2026.
 
 ## Not done yet
 
-- **Video**: built and tested end to end with curl (injection, CSP, jobs,
-  live fMP4 streaming, Range), injected on every site. HLS plays in
+- **Video**: built and tested end to end with curl (injection, CSP, jobs),
+  injected on every site. Seeking anywhere while a job runs (segments
+  through Media Source Extensions, the job restarting where the viewer
+  seeks) is tested in Chromium against local MP4 and HLS sources only; not
+  yet on a real streaming site. HLS plays in
   Chromium on Pornhub (manifest from inline page config, browser-like
   ffmpeg requests); cancelling closed, paused and abandoned jobs is verified with curl only.
   DASH still untested against a real site

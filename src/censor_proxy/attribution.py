@@ -117,11 +117,13 @@ class Timeline:
 class Scanner:
     """Runs `cmd`, an ffmpeg command writing raw RGB frames of w x h at
     cfg.sample_fps to stdout, through `detector` on a thread, filling a
-    Timeline."""
+    Timeline. `t0` is the video time of the first frame (a job restarted
+    where the viewer seeked to)."""
 
     def __init__(self, cmd: list[str], w: int, h: int, cfg: VideoAttributionConfig,
-                 detector: Detector, name: str = "attribution"):
+                 detector: Detector, name: str = "attribution", t0: float = 0.0):
         self.cmd, self.w, self.h, self.cfg, self.detector = cmd, w, h, cfg, detector
+        self.t0 = t0
         self.timeline = Timeline(cfg)
         self._proc: subprocess.Popen | None = None
         self._stopped = threading.Event()
@@ -152,7 +154,7 @@ class Scanner:
                     break
                 frame = np.frombuffer(buf, np.uint8).reshape(self.h, self.w, 3)
                 found = self.detector.detect(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-                self.timeline.add(evidence(k / self.cfg.sample_fps, found, self.cfg))
+                self.timeline.add(evidence(self.t0 + k / self.cfg.sample_fps, found, self.cfg))
                 k += 1
             self._proc.stdout.close()
             rc = self._proc.wait(timeout=30)
