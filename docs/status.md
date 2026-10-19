@@ -3,7 +3,7 @@
 Where the project stands against the handoff plan. Update this when a piece
 of work lands or the plan changes.
 
-Last updated Oct 18, 2026.
+Last updated Oct 19, 2026.
 
 ## Done (Phase 1)
 
@@ -48,6 +48,13 @@ Last updated Oct 18, 2026.
   instead of locking out. Checked in a browser against a test container (whitelist, settings,
   PIN, phone layout). `https://scs.local` was only tested with curl through
   the proxy
+
+- Installers (`install/`): one-line scripts run from GitHub for Linux,
+  macOS and Windows (Docker Desktop, clone, build, system CA trust, system
+  proxy, with `SCS_UNINSTALL=1` to reverse) and a dedicated "Sissy Browser"
+  Chromium profile pinned to the proxy with its own icon. Syntax-checked
+  only (bash, shellcheck, PowerShell parser); not yet run end to end on any
+  platform, and the repository URL is still a placeholder
 
 ## Not done yet
 

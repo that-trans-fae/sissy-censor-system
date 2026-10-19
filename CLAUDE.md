@@ -33,7 +33,8 @@ src/censor_proxy/detection_log.py  JSONL detection log
 src/config/config.yaml         user overrides, mounted at /config
 src/tools/draw_boxes.py        box-draw review of the samples
 src/tests/                     pytest; fixtures/expected-<model>.json
-docs/brand/                    mark, README banners, palette
+docs/brand/                    mark, README banners, palette, browser icon
+install/                       one-line installers (system-level per OS, dedicated browser)
 docs/samples/{censor,mixed,uncensor}/  sample images (not in git)
 ```
 
