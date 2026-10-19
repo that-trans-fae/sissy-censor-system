@@ -393,6 +393,12 @@ whitelist:
     - '(^|\.)(windowsupdate|update\.microsoft|delivery\.mp\.microsoft)\.com:'
     - '^(swscan|swdist|swcdn|mesu|gdmf)\.apple\.com:'
     - '^updates\.cdn-apple\.com:'
+    # Docker: the Hub registry and its sign-in (docker.io), image layers
+    # (served from production.cloudflare.docker.com), Docker Desktop and its
+    # updates, and the package repositories (docker.com). Pulls fail under
+    # interception, since the daemon doesn't trust the proxy CA, and these
+    # hosts carry Docker Hub credentials, not page images.
+    - '(^|\.)docker\.(io|com):'
     # Sign-in providers.
     - '^accounts\.google\.com:'
     - '^login\.(microsoftonline|live)\.com:'
