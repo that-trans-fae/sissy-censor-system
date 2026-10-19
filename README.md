@@ -187,7 +187,11 @@ curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/
 
 [`install/README.md`](install/README.md) covers the environment variables
 the scripts read (image repository, release channel, install folder) and
-more first-run detail.
+more first-run detail. If you would rather not run a script from the
+internet, its [Manual install](install/README.md#manual-install) section
+walks through the same steps by hand: Docker, the proxy folder and its
+`.env`, Chromium, the profile and its CA trust, SafeSearch and the update
+job.
 
 ## What gets installed
 

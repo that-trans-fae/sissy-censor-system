@@ -122,7 +122,9 @@ Last updated Oct 19, 2026.
   that step until the next manifest. The system-level installers were dropped and Linux moved from
   Docker Desktop to Docker Engine (Oct 19, 2026); the Engine path is
   syntax-checked only. The
-  repository URL is still a placeholder
+  repository URL is still a placeholder. `install/README.md` also
+  spells out the install by hand (Oct 19, 2026), step for step as the
+  scripts do it
 
 - Distribution and automatic updates (Oct 19, 2026): the installers pull
   the image from Docker Hub and copy its `dist/` files out (no clone, no
