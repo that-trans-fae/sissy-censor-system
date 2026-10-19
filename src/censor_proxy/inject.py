@@ -18,7 +18,12 @@ import secrets
 HEAD = re.compile(rb"<head\b[^>]*>", re.IGNORECASE)
 HTML = re.compile(rb"<html\b[^>]*>", re.IGNORECASE)
 DOCTYPE = re.compile(rb"<!doctype[^>]*>", re.IGNORECASE)
-MARKER = b"data-censor-proxy"
+# Nothing is inserted past the first of these: a "<head>" inside a script
+# string (reflected content on a page with no head element) would otherwise
+# get our tag, whose "</script>" ends that script and turns what follows
+# into live HTML.
+CONTENT = re.compile(rb"<(?:body|script)\b", re.IGNORECASE)
+WINDOW = 65536
 
 # directive -> directives it falls back to, in order
 _FALLBACKS = {
@@ -91,18 +96,22 @@ def extend_csp_headers(headers, origin: str, nonce: str) -> bool:
 
 def script_tag(origin: str, nonce: str | None) -> bytes:
     attr = f' nonce="{nonce}"' if nonce else ""
-    return f'<script src="{origin}/inject.js"{attr} {MARKER.decode()}></script>'.encode()
+    return f'<script src="{origin}/inject.js"{attr}></script>'.encode()
 
 
 def inject_html(body: bytes, tag: bytes) -> bytes | None:
     """Insert `tag` as early as possible: right after <head>, else after
-    <html>, else after the doctype. None if the page already has it, or if
-    it isn't a full document (an HTML fragment fetched by script, where a
-    prepended tag could break the page that inserts it)."""
-    if MARKER in body[:65536]:
-        return None
+    <html>, else after the doctype, and only before the page's first <body>
+    or <script>. None if it isn't a full document (an HTML fragment fetched
+    by script, where a prepended tag could break the page that inserts it).
+
+    Always injected, even if the page carries our tag already: the script
+    runs once per document on its own, and a body check would let any site
+    opt out by including the marker."""
+    stop = CONTENT.search(body, 0, WINDOW)
+    end = stop.start() if stop else WINDOW
     for pattern in (HEAD, HTML, DOCTYPE):
-        m = pattern.search(body, 0, 65536)
+        m = pattern.search(body, 0, end)
         if m:
             return body[:m.end()] + tag + body[m.end():]
     return None

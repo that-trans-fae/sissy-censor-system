@@ -60,16 +60,37 @@ def test_inject_after_head():
     assert out == b"<!doctype html><html lang=en><HEAD id=x>" + tag + b"<title>t</title></head>"
 
 
-def test_inject_without_head_and_idempotent():
+def test_inject_without_head():
     tag = script_tag(O, "N")
     assert b'nonce="N"' in tag
     out = inject_html(b"<html><body>hi</body></html>", tag)
     assert out.startswith(b"<html>" + tag)
-    assert inject_html(out, tag) is None
+
+
+def test_page_carrying_our_tag_is_injected_anyway():
+    # A body check would let any site opt out by including the tag or a
+    # marker; the script itself runs once per document.
+    tag = script_tag(O, None)
+    page = b"<html><head>" + tag + b"</head></html>"
+    assert inject_html(page, tag) == b"<html><head>" + tag + tag + b"</head></html>"
 
 
 def test_fragments_left_alone():
     assert inject_html(b'<div class="comment">hi</div>', script_tag(O, None)) is None
+
+
+def test_head_inside_script_string_not_used():
+    # No head element; a script string holds "<head>" followed by attacker
+    # markup. Our tag's "</script>" would end that script and make the rest
+    # live HTML, so only the <html> tag before the script is used.
+    tag = script_tag(O, None)
+    page = (b'<!doctype html><html><script>var s = "<head><img src=x onerror=alert(1)>";'
+            b'</script><body>hi</body></html>')
+    out = inject_html(page, tag)
+    assert out == b"<!doctype html><html>" + tag + page[len(b"<!doctype html><html>"):]
+    # Nothing usable before the first script: left alone rather than guessed.
+    assert inject_html(b'<script>var s = "<html><head>";</script><p>hi', tag) is None
+    assert inject_html(b'<body><script>var s = "<!doctype html>";</script>', tag) is None
 
 
 def test_reddit_style_nonce_policy():

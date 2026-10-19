@@ -45,6 +45,11 @@ Last updated Oct 18, 2026.
   global or script tag left in the page, Referer from the `Origin` header,
   a queue cap and per-origin rate limit on job starts, and an ffmpeg
   protocol whitelist. Tested with pytest only, not yet in a browser
+- Injection only before the page's first `<body>`/`<script>`, no body
+  opt-out marker, the admin panel's Video tab explains the injection
+  trade-off, and the compose service runs read-only with no capabilities
+  (Oct 19, 2026); the hardened container was started and exercised with
+  curl
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, domain whitelist (`youtube.com` in the
   example config), censoring levels (strict, lax, custom; any number of
@@ -78,9 +83,9 @@ Last updated Oct 18, 2026.
   log also show a penis. Next: video-level (rolling-window) attribution;
   see `docs/handoff-video-attribution.md`
 
-- **Security warning**: tell the user that video injection extends every
-  page's CSP and lets pages ask the proxy to fetch public video URLs (now
-  rate-limited and capped; see `docs/decisions.md`, "Page-facing surface")
+- **Non-root container**: the service still runs as root because the CA
+  directory and confdir are root's; moving to a fixed uid needs the volume
+  ownership sorted out
 
 ## Later phases (from the handoff)
 

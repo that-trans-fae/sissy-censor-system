@@ -12,7 +12,10 @@ docker compose up -d --build
 
 The proxy listens on `127.0.0.1:8080`. On first start mitmproxy creates its CA
 in `./mitmproxy/`, which is kept across rebuilds so trust only has to be
-installed once. Check that it's up:
+installed once. The container runs with a read-only root filesystem and no
+capabilities (`compose.yaml`); once the CA exists, you can mount
+`./mitmproxy` read-only too (append `:ro` to its volume line) so nothing in
+the container can replace it. Check that it's up:
 
 ```bash
 curl -x http://127.0.0.1:8080 http://censor.local/health
