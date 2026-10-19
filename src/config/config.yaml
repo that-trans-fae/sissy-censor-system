@@ -19,3 +19,6 @@ whitelist:
   domains: []
 detection:
   male_context_exempts: false
+model:
+  workers: 4
+  threads_per_worker: 8
