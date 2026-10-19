@@ -15,3 +15,6 @@ review*/
 
 # Sample images stay local; tests/test_samples.py skips without them
 docs/samples/
+
+# Claude Code local state (worktrees)
+.claude/
