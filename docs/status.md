@@ -115,8 +115,9 @@ Last updated Oct 19, 2026.
 - **Video**: built and tested end to end with curl (injection, CSP, jobs),
   injected on every site. Seeking anywhere while a job runs (segments
   through Media Source Extensions, the job restarting where the viewer
-  seeks) is tested in Chromium against local MP4 and HLS sources only; not
-  yet on a real streaming site. HLS plays in
+  seeks) is tested in Chromium against local MP4 and HLS sources; on a
+  real streaming site a far seek into a long video looped restarting
+  (fixed Oct 19, 2026; needs a retest there). HLS plays in
   Chromium on Pornhub (manifest from inline page config, browser-like
   ffmpeg requests); cancelling closed, paused and abandoned jobs is verified with curl only.
   DASH still untested against a real site

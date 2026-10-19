@@ -338,6 +338,9 @@ video:
   # seconds of video from the target; further, the job restarts there
   # (a restart costs a few seconds while ffmpeg reopens the source).
   seek_wait_seconds: 10
+  # A job that gets no frame from the source for this long (a stalled
+  # network read) restarts at the segment it was on. 0 waits forever.
+  stall_seconds: 20
   # Longer videos are refused (they stay covered).
   max_duration_seconds: 1800
   # Jobs beyond this wait in a queue ("Waiting for another video").

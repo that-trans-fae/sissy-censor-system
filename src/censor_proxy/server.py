@@ -211,12 +211,15 @@ class _Handler(BaseHTTPRequestHandler):
         deadline = time.monotonic() + SEGMENT_WAIT
         # Decided under the job's lock, answered after it: the pump needs it.
         with job.changed:
+            job.requests += 1
+            me = job.requests
             while True:
                 if job.check(n):
                     outcome, (run, first) = "ready", job.run_of[n]
                     break
                 wait = math.ceil(v.seek_wait_seconds / job.segment_seconds) if job.segment_seconds else 0
-                job.seek(n, wait)
+                if job.requests == me:
+                    job.seek(n, wait)
                 if job.state == "error":
                     outcome = "error"
                     break

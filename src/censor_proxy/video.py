@@ -104,6 +104,13 @@ class Job:
     position: int | None = None
     run_first: int = 0
     restart_at: int | None = None
+    # Segment requests so far. Only the newest one still waiting may seek:
+    # a player that seeks again drops its fetch, but the server goes on
+    # waiting on it and would pull the job back.
+    requests: int = 0
+    # When the current run last showed progress (time.monotonic()): a frame
+    # read, or a wait on the attribution scan.
+    alive: float = 0.0
     # Video time judged to be in a male stretch (video_attribution).
     seconds_male: float = 0.0
     created: float = field(default_factory=time.time)
@@ -519,6 +526,55 @@ class _Seek(Exception):
     """A viewer seeked where the current run won't get to soon."""
 
 
+# How long a seek or cancel may wait for the pump to notice it before the
+# watchdog kills the run's ffmpegs. The pump checks at every sample, so
+# only a pump blocked on a pipe takes this long.
+INTERRUPT_GRACE = 2.0
+
+
+class _Watchdog:
+    """Stops a run the pump can't stop itself because it is blocked reading
+    the decoder or writing the encoder (a stalled source read holds both): it
+    kills the ffmpegs when a seek or cancel goes unanswered, or when no frame
+    has come for stall_seconds, and then asks for a restart at the segment
+    the run was on."""
+
+    def __init__(self, job: Job, procs, cfg: Config):
+        self.job, self.procs, self.cfg = job, procs, cfg
+        self.fired = False
+        self._done = threading.Event()
+        self._thread = threading.Thread(target=self._watch, name=f"watch-{job.id[:8]}", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._done.set()
+        self._thread.join()
+
+    def _watch(self) -> None:
+        job, v = self.job, self.cfg.video
+        pending_since = None
+        while not self._done.wait(0.25):
+            now = time.monotonic()
+            if job.restart_at is not None or job.stop_reason(v.abandon_seconds):
+                pending_since = pending_since or now
+                if now - pending_since < INTERRUPT_GRACE:
+                    continue
+                log.info("video %s: run blocked; stopping it for a seek or cancel", job.id)
+            elif v.stall_seconds and now - job.alive > v.stall_seconds:
+                with job.changed:
+                    if job.restart_at is None and job.position is not None:
+                        job.restart_at = job.position
+                log.warning("video %s: no frames for %.0fs; restarting at segment %s",
+                            job.id, now - job.alive, job.position)
+            else:
+                pending_since = None
+                continue
+            self.fired = True
+            for proc in self.procs:
+                proc.kill()
+            return
+
+
 def censor_video(job: Job, cfg: Config, detector: Detector,
                  attribution_detector: Detector | None = None) -> None:
     """Censor job.src into segments in job.out_dir, one run after another
@@ -554,6 +610,13 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
     with job.changed:
         job.runs += 1
         run = job.runs
+        # Claimed now, not at the first frame: opening the source at t0 can
+        # take seconds, and a request for `first` meanwhile (or one made
+        # between runs) must not restart the run before it starts.
+        job.position, job.run_first = first, first
+        if job.restart_at == first:
+            job.restart_at = None
+        job.alive = time.monotonic()  # opening the source counts against stall_seconds
     net = _net_args(job, vcfg.source_protocols)
     seek = ["-ss", f"{t0:.6f}"] if first else []
     decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *seek, "-i", job.src,
@@ -601,6 +664,7 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
         timeline = scanner.start() if scanner else None
         dec = subprocess.Popen(decode_cmd, stdout=subprocess.PIPE, stderr=dec_err)
         enc = subprocess.Popen(encode_cmd, stdin=subprocess.PIPE, stderr=enc_err)
+        watchdog = _Watchdog(job, (dec, enc), cfg)
         try:
             stopped, frames = _pump(dec.stdout, enc.stdin, w, h, w * h * 3, fps, step, job, cfg,
                                     detector, timeline, first=first, segment_frames=seg, run=run)
@@ -608,13 +672,15 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
             # The segment in progress is lost; its temporary file is removed below.
             for proc in (dec, enc):
                 proc.kill()
-        except BaseException:
+        except BaseException as e:
             # Cancelled or failed: the encoder would otherwise keep reading
             # the audio input from the network before it noticed.
             for proc in (dec, enc):
                 proc.kill()
-            raise
+            if not (watchdog.fired and isinstance(e, Exception)):  # a pipe closing under it
+                raise
         finally:
+            watchdog.stop()
             if scanner:
                 scanner.stop()
             if stopped == "reached":
@@ -628,6 +694,11 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
                         pass
             enc_rc, dec_rc = enc.wait(timeout=120), dec.wait(timeout=30)
             job.update(position=None)
+        if watchdog.fired:
+            # However the pump ended once its pipes were killed, it was stopped.
+            if reason := job.stop_reason(vcfg.abandon_seconds):
+                raise VideoError(reason)
+            stopped = "seek"
         if stopped == "seek":
             for f in job.out_dir.glob("*.tmp"):
                 f.unlink(missing_ok=True)
@@ -680,6 +751,7 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
     def attributed_male(t: float) -> bool:
         nonlocal was_male, scan_failed
         while not timeline.wait(t + acfg.lookahead_seconds, 0.5):
+            job.alive = time.monotonic()  # waiting on the scan isn't a stall
             if reason := job.stop_reason(cfg.video.abandon_seconds):
                 raise VideoError(reason)
             if job.restart_at is not None:
@@ -719,6 +791,7 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
         buf = src.read(frame_bytes)
         if len(buf) < frame_bytes:
             break
+        job.alive = time.monotonic()
         frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3).copy()
         if index % step == 0:
             if reason := job.stop_reason(cfg.video.abandon_seconds):

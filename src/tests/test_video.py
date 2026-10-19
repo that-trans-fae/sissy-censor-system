@@ -1,5 +1,6 @@
 import io
 import json
+import shlex
 import shutil
 import subprocess
 import threading
@@ -137,6 +138,87 @@ def test_seek_restarts_the_job_there_then_fills_the_gap(cfg, tmp_path):
     assert not list(job.out_dir.glob("*.tmp"))
     for n in range(6):
         assert segment_info(job, n)["video"]["nb_read_packets"] == "10"
+
+
+@needs_ffmpeg
+def test_a_request_while_the_run_opens_the_source_does_not_restart_it(cfg, tmp_path, monkeypatch):
+    src = tmp_path / "in.mp4"
+    make_test_video(src, seconds=6, audio=False)
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    calls = asks = 0
+
+    def detect(bgr):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            job.seek(4, wait_segments=1)
+        return []
+
+    popen = subprocess.Popen
+
+    def opening(cmd, *args, **kwargs):
+        nonlocal asks
+        if "-ss" in cmd and asks < 3:  # the player asks again while the source opens
+            asks += 1
+            job.seek(4, wait_segments=1)
+        return popen(cmd, *args, **kwargs)
+    monkeypatch.setattr("censor_proxy.video.subprocess.Popen", opening)
+    censor_video(job, local_files(cfg, segment_seconds=1), FakeDetector(detect))
+    assert asks == 1 and job.runs == 3 and job.done == set(range(6))
+    assert job.run_of[4] == (2, 4)
+
+
+def stalling_decoder(monkeypatch, after_frames):
+    """The first run's decoder delivers after_frames frames, then hangs the
+    way a stalled network read does (pipe open, nothing coming)."""
+    popen = subprocess.Popen
+    launched = 0
+
+    def fake(cmd, *args, **kwargs):
+        nonlocal launched
+        if "rawvideo" in cmd and cmd[-1] == "pipe:1":  # a decoder
+            launched += 1
+            if launched == 1:
+                w, h = cmd[cmd.index("-vf") + 1].removeprefix("scale=").split(":")
+                size = after_frames * int(w) * int(h) * 3
+                cmd = ["sh", "-c", f"{shlex.join(cmd)} | head -c {size}; exec sleep 600"]
+        return popen(cmd, *args, **kwargs)
+    monkeypatch.setattr("censor_proxy.video.subprocess.Popen", fake)
+
+
+@needs_ffmpeg
+def test_a_stalled_run_restarts_where_it_was(cfg, tmp_path, monkeypatch):
+    src = tmp_path / "in.mp4"
+    make_test_video(src, seconds=6, audio=False)
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    stalling_decoder(monkeypatch, after_frames=25)  # stalls in segment 2
+    censor_video(job, local_files(cfg, segment_seconds=1, stall_seconds=1), FakeDetector([]))
+    assert job.done == set(range(6)) and job.run_of[2] == (2, 2)
+
+
+@needs_ffmpeg
+def test_a_seek_stops_a_blocked_run(cfg, tmp_path, monkeypatch):
+    src = tmp_path / "in.mp4"
+    make_test_video(src, seconds=6, audio=False)
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    stalling_decoder(monkeypatch, after_frames=25)
+    threading.Timer(1.0, job.seek, args=(4, 1)).start()
+    started = time.monotonic()
+    censor_video(job, local_files(cfg, segment_seconds=1, stall_seconds=0), FakeDetector([]))
+    assert job.done == set(range(6)) and job.run_of[4] == (2, 4)
+    assert time.monotonic() - started < 15
+
+
+@needs_ffmpeg
+def test_a_cancel_stops_a_blocked_run(cfg, tmp_path, monkeypatch):
+    src = tmp_path / "in.mp4"
+    make_test_video(src, seconds=6, audio=False)
+    job = Job("t", str(src), out_dir=tmp_path / "out", state="running")
+    stalling_decoder(monkeypatch, after_frames=25)
+    threading.Timer(1.0, job.cancel, args=("cancelled: the page closed",)).start()
+    with pytest.raises(VideoError, match="the page closed"):
+        censor_video(job, local_files(cfg, segment_seconds=1, stall_seconds=0), FakeDetector([]))
+    assert job.runs == 1
 
 
 def test_seek_waits_when_the_job_is_close():
@@ -373,6 +455,31 @@ def test_server_segment_request_restarts_the_job(server, monkeypatch):
     assert status == 202 and job.restart_at is None
     status, _, body = get(f"{base}/video/{job.id}/segment/50")
     assert status == 202 and job.restart_at == 50
+
+
+def test_server_only_the_newest_segment_request_seeks(server, monkeypatch, tmp_path):
+    srv, jobs, base = server
+    monkeypatch.setattr("censor_proxy.server.SEGMENT_WAIT", 1.5)
+    job = Job("e" * 24, "https://example.com/v.mp4", out_dir=tmp_path / "v", state="running",
+              segment_seconds=4.0, segments=100, position=2)
+    job.out_dir.mkdir()
+    jobs._jobs[job.id] = job
+    job.segment_path(3).write_bytes(b"seg3")
+    job.run_of[3] = (1, 0)
+    # The viewer jumps to segment 50, then back to 3 before it is ready.
+    # Their fetch for 50 is dropped, but the server is still waiting on it.
+    stale = threading.Thread(target=get, args=(f"{base}/video/{job.id}/segment/50",))
+    stale.start()
+    for _ in range(50):
+        if job.restart_at == 50:
+            break
+        time.sleep(0.02)
+    assert get(f"{base}/video/{job.id}/segment/3")[2] == b"seg3"
+    job.take_restart()  # the job goes to 50...
+    job.update(position=None)
+    time.sleep(0.3)
+    assert job.restart_at is None  # ...and the dropped request doesn't ask for it again
+    stale.join()
 
 
 def post_job(base, body, origin="https://www.reddit.com"):

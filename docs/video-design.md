@@ -118,7 +118,19 @@ job can be restarted anywhere:
   `video.seek_wait_seconds` (10 s of video), it just waits; otherwise the
   run is killed and a new one starts at that segment, about 1.5 s from
   seek to picture on a local source. The segment in progress (and the one
-  the encoder hadn't written out yet) is lost.
+  the encoder hadn't written out yet) is lost. A new run claims its first
+  segment before ffmpeg opens the source, and only the newest segment
+  request may restart the job (a fetch the player dropped on seeking
+  again keeps waiting server-side). Without both, seeking far into a long
+  remote video looped: opening the source at `-ss` took over a second, the
+  waiting request saw no run at its segment and restarted it, again and
+  again (Oct 19, 2026).
+- The pump notices a seek or cancel between frames, so a run blocked on a
+  stalled source read couldn't be stopped: on YouPorn (HLS) a run hung
+  ~2 minutes at 70 s, and a seek made meanwhile waited it out. A watchdog
+  per run now kills its ffmpegs when a seek or cancel goes unanswered for
+  2 s, or when no frame has come for `video.stall_seconds` (20 s), in which
+  case the job restarts at the segment it was on (Oct 19, 2026).
 - After the end, the job goes back for the segments it skipped, so the
   finished copy is complete and later seeks are instant.
 - ffmpeg's HLS muxer writes the segments (fMP4, each renamed into place
