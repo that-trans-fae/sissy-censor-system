@@ -21,8 +21,9 @@ Last updated Oct 19, 2026.
   taskbar pin carry the AppUserModelID Chromium stamps on the profile's
   windows, built with Chromium's 64-character truncation, so the Sissy
   Browser groups and pins as itself, not as Chromium; see `decisions.md`.
-  The id was confirmed against a running window on a Windows machine; the
-  grouping itself after the fix is not yet.
+  Confirmed on Windows 11 with Chromium 155: the shortcuts, the re-stamped
+  pin and the running window carry the same id, and the taskbar shows one
+  Sissy Browser button with its own icon.
 - `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
   sampling and a content-hash cache
 - Female-only selection rule with context thresholds (see `decisions.md`)
