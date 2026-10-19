@@ -125,10 +125,13 @@ Both scripts read these environment variables:
 | `SCS_IMAGE_REPO` | `thattransfae/scs` | Docker Hub repository |
 | `SCS_CHANNEL` | `$SCS_IMAGE_REPO:latest` | Tag to install and follow |
 | `SCS_DIR` | `~/scs` (`%USERPROFILE%\scs`) | Where the proxy runs from |
-| `SCS_UNINSTALL` | unset | `1` removes the launcher, its profile and the update job (same as `--uninstall` / `-Uninstall`) |
+| `SCS_UNINSTALL` | unset | `1` uninstalls (same as `--uninstall` / `-Uninstall`) |
 | `SCS_GPU` | `1` | `0` leaves the GPU out of the container (see below) |
 
-Undo keeps Docker, Chromium and `~/scs`:
+Uninstalling removes the browser launcher, its profile, the update job and
+the proxy's container and image, then asks before removing Docker (with
+everything in it), Chromium and, on Windows, WSL. `~/scs` (config, logs and
+the CA) is kept; delete it by hand if you won't reinstall.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall

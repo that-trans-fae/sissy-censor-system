@@ -14,8 +14,10 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 #
-# Remove the launcher, its profile and the update job (keeps Docker,
-# Chromium and ~/scs): --uninstall, or SCS_UNINSTALL=1 in the environment:
+# Uninstall: removes the launcher, its profile, the update job and the
+# proxy's container and image, asks before removing Docker and Chromium,
+# and keeps ~/scs (config, logs, CA). --uninstall, or SCS_UNINSTALL=1 in
+# the environment:
 #
 #   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
 #
@@ -621,12 +623,146 @@ uninstall_launcher() {
   rm -rf "$(profile_dir)"
 }
 
-# -------------------------------------------------------------------- main
-if [ "$SCS_UNINSTALL" = 1 ]; then
+# --------------------------------------------------------------- uninstall
+# A yes/no question on the terminal (stdin is the script when piped). No
+# terminal, or no answer, means no.
+ask() {
+  local ans=
+  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '\033[1;35m==>\033[0m %s [y/N] ' "$1" >/dev/tty
+    read -r ans </dev/tty || true
+  fi
+  case "$ans" in y|Y|yes|Yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+docker_installed() {
+  if [ "$OS" = Linux ]; then have docker && systemctl cat docker.service >/dev/null 2>&1
+  else [ -d /Applications/Docker.app ]
+  fi
+}
+chromium_cmd() {
+  if [ "$OS" = Darwin ]; then [ -d /Applications/Chromium.app ] && echo /Applications/Chromium.app; return; fi
+  for c in chromium chromium-browser; do have "$c" && command -v "$c" && return; done
+  return 1
+}
+
+# Docker for the uninstall: Engine on Linux (sudo while this user is not in
+# the docker group), Docker Desktop on macOS, started if it is not running.
+docker_ready() {
+  if [ "$OS" = Linux ]; then
+    export DOCKER_HOST=unix:///var/run/docker.sock
+    docker info >/dev/null 2>&1 && return 0
+    DOCKER=(sudo docker)
+    sudo docker info >/dev/null 2>&1
+    return
+  fi
+  docker info >/dev/null 2>&1 && return 0
+  log "Starting Docker Desktop to remove the proxy"
+  open -ga Docker
+  local waited=0
+  until docker info >/dev/null 2>&1; do
+    [ "$waited" -lt 120 ] || return 1
+    sleep 5; waited=$((waited + 5))
+  done
+}
+
+# The channel this install follows, for the image tags to remove.
+channel_repo() {
+  local channel=$SCS_CHANNEL
+  [ ! -f "$SCS_DIR/.env" ] || channel=$(sed -n 's/^SCS_CHANNEL=//p' "$SCS_DIR/.env" | tail -n 1 | tr -d '"')
+  echo "${channel:-$SCS_CHANNEL}" | sed 's/:[^:/]*$//'
+}
+
+remove_proxy() {
+  log "Removing the proxy container and image"
+  if ! docker_installed || ! docker_ready; then
+    warn "Docker is not available; the proxy container and image were left. With Docker running: (cd $SCS_DIR && docker compose down) and docker image rm $(channel_repo)"
+    return
+  fi
+  if [ -f "$SCS_DIR/compose.yaml" ]; then
+    (cd "$SCS_DIR" && "${DOCKER[@]}" compose down --remove-orphans) || warn "docker compose down failed"
+  fi
+  local ids
+  ids=$("${DOCKER[@]}" images --filter "reference=$(channel_repo)" -q | sort -u)
+  # shellcheck disable=SC2086
+  [ -z "$ids" ] || "${DOCKER[@]}" image rm -f $ids >/dev/null || warn "some images could not be removed"
+}
+
+remove_docker() {
+  log "Removing Docker"
+  if [ "$OS" = Linux ]; then
+    sudo systemctl disable --now docker.service docker.socket containerd.service 2>/dev/null || true
+    case "$PKG" in
+      apt)
+        local pkgs=() p
+        for p in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras docker.io docker-compose-v2; do
+          dpkg -s "$p" >/dev/null 2>&1 && pkgs+=("$p")
+        done
+        [ ${#pkgs[@]} -eq 0 ] || sudo apt-get purge -y "${pkgs[@]}"
+        sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.asc
+        ;;
+      dnf)
+        sudo dnf remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        sudo rm -f /etc/yum.repos.d/docker-ce.repo
+        ;;
+      pacman) sudo pacman -Rns --noconfirm docker docker-compose docker-buildx ;;
+    esac
+    sudo rm -rf /var/lib/docker /var/lib/containerd
+    sudo gpasswd -d "$USER" docker >/dev/null 2>&1 || true
+    return
+  fi
+  osascript -e 'quit app "Docker"' >/dev/null 2>&1 || true
+  local brew; brew=$(brew_bin)
+  if [ -n "$brew" ] && "$brew" list --cask docker-desktop >/dev/null 2>&1; then "$brew" uninstall --zap --cask docker-desktop
+  elif [ -n "$brew" ] && "$brew" list --cask docker >/dev/null 2>&1; then "$brew" uninstall --zap --cask docker
+  else warn "Docker Desktop was not installed by Homebrew; uninstall it from its Troubleshoot menu"
+  fi
+}
+
+remove_chromium() {
+  local c=$1
+  log "Removing Chromium"
+  if [ "$OS" = Darwin ]; then
+    local brew; brew=$(brew_bin)
+    if [ -n "$brew" ] && "$brew" list --cask chromium >/dev/null 2>&1; then "$brew" uninstall --cask chromium
+    else warn "Chromium was not installed by Homebrew; drag $c to the Trash"
+    fi
+    return
+  fi
+  if [ "$c" = /snap/bin/chromium ] || [ "$c" = /snap/bin/chromium-browser ]; then
+    sudo snap remove chromium
+    return
+  fi
+  case "$PKG" in
+    apt)
+      local pkgs=() p
+      for p in chromium chromium-browser; do dpkg -s "$p" >/dev/null 2>&1 && pkgs+=("$p"); done
+      [ ${#pkgs[@]} -eq 0 ] || sudo apt-get purge -y "${pkgs[@]}"
+      ;;
+    dnf)    sudo dnf remove -y chromium ;;
+    pacman) sudo pacman -Rns --noconfirm chromium ;;
+  esac
+}
+
+uninstall() {
+  # The questions first, so nothing is started only to be removed.
+  local remove_docker=0 remove_chromium=0 chromium
+  if docker_installed; then
+    ask "Remove Docker too, with every container, image and volume on this machine?" && remove_docker=1
+  fi
+  if chromium=$(chromium_cmd); then
+    ask "Remove Chromium too ($chromium)?" && remove_chromium=1
+  fi
   uninstall_launcher
   uninstall_updater
-  log "Done. Docker, Chromium and $SCS_DIR were left in place; stop the proxy with"
-  echo "    (cd $SCS_DIR && docker compose down)"
+  if [ "$remove_docker" = 1 ]; then remove_docker; else remove_proxy; fi
+  [ "$remove_chromium" = 0 ] || remove_chromium "$chromium"
+  log "Done. $SCS_DIR (the proxy's config, logs and CA) was left in place; delete it if you won't reinstall."
+}
+
+# -------------------------------------------------------------------- main
+if [ "$SCS_UNINSTALL" = 1 ]; then
+  uninstall
   exit 0
 fi
 

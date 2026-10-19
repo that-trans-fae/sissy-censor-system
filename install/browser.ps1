@@ -21,9 +21,11 @@ doesn't apply to iex anyway. Since the script runs in the window's own
 session, it keeps to a child scope and stops with throw, never exit, which
 would close the window.
 
-Remove the shortcut, its profile and the update task (keeps Docker Desktop,
-Chromium and %USERPROFILE%\scs): the -Uninstall switch (or SCS_UNINSTALL=1
-in the environment, which "irm | iex" can't pass a switch to):
+Uninstall: removes the shortcut, its profile, the update task and the
+proxy's container and image, asks before removing Docker Desktop, Chromium
+and WSL, and keeps %USERPROFILE%\scs (config, logs, CA). The -Uninstall
+switch, or SCS_UNINSTALL=1 in the environment, which "irm | iex" can't pass
+a switch to:
 
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1))) -Uninstall
 
@@ -468,15 +470,142 @@ function Uninstall-Shortcuts {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BrowserHome
 }
 
+# ---------------------------------------------------------------- uninstall
+# A yes/no question in the window. No window, or no answer, means no.
+function Ask($question) {
+    if (-not [Environment]::UserInteractive) { return $false }
+    try { $ans = Read-Host "==> $question [y/N]" } catch { return $false }
+    return [bool]($ans -match '^(y|yes)$')
+}
+# A native command's stdout, stderr dropped (see Quiet).
+function Capture([scriptblock]$cmd) {
+    $ErrorActionPreference = 'Continue'
+    & $cmd 2> $null
+}
+# wsl.exe prints UTF-16; names of the registered distributions, Docker
+# Desktop's own left out.
+function Wsl-Distros {
+    if (-not (Have wsl)) { return @() }
+    $prev = [Console]::OutputEncoding
+    try {
+        [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+        $out = Capture { wsl --list --quiet }
+        if ($LASTEXITCODE -ne 0) { return @() }
+    } finally { [Console]::OutputEncoding = $prev }
+    return @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ -and $_ -notlike 'docker-desktop*' })
+}
+function Test-Wsl {
+    if (-not (Have wsl)) { return $false }
+    Quiet { wsl --status }
+    return $LASTEXITCODE -eq 0
+}
+# The channel this install follows, for the image tags to remove.
+function Channel-Repo {
+    $channel = $ScsChannel
+    $envFile = Join-Path $ScsDir '.env'
+    if (Test-Path $envFile) {
+        $line = Get-Content $envFile | Where-Object { $_.StartsWith('SCS_CHANNEL=') } | Select-Object -Last 1
+        if ($line) { $channel = ($line.Substring('SCS_CHANNEL='.Length) -replace '"', '') }
+    }
+    return $channel.Substring(0, $channel.LastIndexOf(':'))
+}
+
+function Remove-Proxy {
+    Log 'Removing the proxy container and image'
+    $repo = Channel-Repo
+    $left = "the proxy container and image were left. With Docker Desktop running: cd $ScsDir; docker compose down; docker image rm (docker images -q $repo)"
+    if (-not (Test-Path $DockerDesktopExe)) { Warn "Docker Desktop is not installed; $left"; return }
+    Refresh-Path
+    Quiet { docker info }
+    if ($LASTEXITCODE -ne 0) {
+        if (-not (Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue)) {
+            Log 'Starting Docker Desktop to remove the proxy'
+            Start-Process $DockerDesktopExe
+        }
+        $waited = 0
+        while ($true) {
+            Quiet { docker info }
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($waited -ge 120) { Warn "Docker Desktop did not start; $left"; return }
+            Start-Sleep 5; $waited += 5
+        }
+    }
+    if (Test-Path (Join-Path $ScsDir 'compose.yaml')) {
+        Push-Location $ScsDir
+        try {
+            docker compose down --remove-orphans
+            if ($LASTEXITCODE -ne 0) { Warn 'docker compose down failed' }
+        } finally { Pop-Location }
+    }
+    $ids = @(docker images --filter "reference=$repo" -q | Select-Object -Unique)
+    foreach ($id in $ids) {
+        Quiet { docker image rm -f $id }
+        if ($LASTEXITCODE -ne 0) { Warn "image $id could not be removed" }
+    }
+}
+
+# Docker Desktop's uninstaller takes its WSL distributions and data
+# (every container and image) with it.
+function Remove-DockerDesktop {
+    Log 'Removing Docker Desktop (it asks to run as administrator)'
+    Get-Process 'Docker Desktop', 'com.docker.backend' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    winget uninstall -e --id Docker.DockerDesktop --accept-source-agreements --silent
+    if ($LASTEXITCODE -ne 0) { Warn "winget could not remove Docker Desktop (exit $LASTEXITCODE); remove it from Settings > Apps" }
+}
+
+function Remove-Chromium($exe) {
+    Log "Removing Chromium ($exe)"
+    Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force -ErrorAction SilentlyContinue
+    winget uninstall -e --id $ChromiumWingetId --accept-source-agreements --silent
+    if (-not (Test-Path $exe)) { return }
+    # Not winget's: Chromium's own uninstaller, next to chrome.exe.
+    $setup = Get-ChildItem (Join-Path (Split-Path $exe) '*\Installer\setup.exe') -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $setup) { Warn "could not remove Chromium at $exe; remove it from Settings > Apps"; return }
+    $opts = @('--uninstall', '--force-uninstall')
+    if ($exe -like "$env:ProgramFiles\*" -or $exe -like "${env:ProgramFiles(x86)}\*") {
+        Start-Process -Wait -Verb RunAs -FilePath $setup.FullName -ArgumentList ($opts + '--system-level')
+    } else {
+        Start-Process -Wait -FilePath $setup.FullName -ArgumentList $opts
+    }
+    if (Test-Path $exe) { Warn "Chromium is still at $exe; remove it from Settings > Apps" }
+}
+
+# The Store WSL package, every remaining distribution, and the Windows
+# features behind them (a restart finishes that).
+function Remove-Wsl {
+    Log 'Removing the Windows Subsystem for Linux (asks to run as administrator)'
+    Quiet { wsl --shutdown }
+    foreach ($d in Wsl-Distros) { Quiet { wsl --unregister $d } }
+    Quiet { wsl --uninstall }
+    $cmd = 'dism /online /disable-feature /featurename:Microsoft-Windows-Subsystem-Linux /norestart; ' +
+           'dism /online /disable-feature /featurename:VirtualMachinePlatform /norestart'
+    Start-Process -Wait -Verb RunAs powershell.exe -ArgumentList '-NoProfile', '-Command', $cmd
+}
+
+function Uninstall {
+    # The questions first, so nothing is started only to be removed.
+    $removeDocker = (Test-Path $DockerDesktopExe) -and (Ask 'Remove Docker Desktop too, with every container and image in it?')
+    $chromium = Find-Chromium
+    $removeChromium = $chromium -and (Ask "Remove Chromium too ($chromium)?")
+    $removeWsl = $false
+    if ((Test-Wsl) -and ($removeDocker -or -not (Test-Path $DockerDesktopExe))) {
+        $distros = Wsl-Distros
+        $q = 'Remove the Windows Subsystem for Linux too'
+        if ($distros) { $q += ", with its Linux distributions ($($distros -join ', '))" }
+        $removeWsl = Ask "$q?"
+    }
+    Uninstall-Shortcuts
+    Uninstall-Updater
+    if ($removeDocker) { Remove-DockerDesktop } else { Remove-Proxy }
+    if ($removeChromium) { Remove-Chromium $chromium }
+    if ($removeWsl) { Remove-Wsl }
+    Log "Done. $ScsDir (the proxy's config, logs and CA) was left in place; delete it if you won't reinstall."
+    if ($removeWsl) { Write-Host '    Restart Windows to finish removing WSL.' }
+}
+
 # -------------------------------------------------------------------- main
 try {
-    if ($Uninstall) {
-        Uninstall-Shortcuts
-        Uninstall-Updater
-        Log "Done. Docker Desktop, Chromium and $ScsDir were left in place; stop the proxy with"
-        Write-Host "    cd $ScsDir; docker compose down"
-        return
-    }
+    if ($Uninstall) { Uninstall; return }
 
     Install-DockerDesktop
     Start-DockerDesktop

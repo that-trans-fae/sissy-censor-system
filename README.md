@@ -173,8 +173,9 @@ A few platform notes:
   reapplies the settings. On Windows, rerun it if the proxy ever makes a
   new CA, since the certificate's fingerprint is baked into the shortcut.
 
-To remove the browser, its profile and the update job (Docker, Chromium and
-the `~/scs` folder are kept):
+To uninstall (removes the browser, its profile, the update job and the proxy
+container and image, asks before removing Docker, Chromium and WSL, and
+keeps the `~/scs` folder):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
