@@ -179,7 +179,7 @@ start_docker() {
     return
   fi
   log "Starting Docker Desktop"
-  open -ga Docker
+  open -g /Applications/Docker.app
   local waited=0
   until docker info >/dev/null 2>&1; do
     if [ "$waited" -eq 0 ]; then
@@ -720,7 +720,7 @@ docker_ready() {
   fi
   docker info >/dev/null 2>&1 && return 0
   log "Starting Docker Desktop to remove the proxy"
-  open -ga Docker
+  open -g /Applications/Docker.app
   local waited=0
   until docker info >/dev/null 2>&1; do
     [ "$waited" -lt 120 ] || return 1
