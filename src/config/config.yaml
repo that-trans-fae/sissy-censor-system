@@ -22,3 +22,4 @@ detection:
 model:
   workers: 4
   threads_per_worker: 8
+  resources: maximum
