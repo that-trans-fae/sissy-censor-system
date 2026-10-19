@@ -221,8 +221,11 @@ of every `docker` command below.
 macOS and Windows: install Docker Desktop (`brew install --cask
 docker-desktop`, or `winget install Docker.DockerDesktop`; Windows needs
 WSL 2 first, `wsl --install --no-distribution` from an elevated PowerShell
-and a reboot). Start it, accept the service agreement in its window, and
-wait until `docker info` works.
+and a reboot). On macOS, Homebrew needs the Command Line Tools
+(`xcode-select --install`; a macOS upgrade can remove them) and should be
+current (`brew update`): an outdated one installs the Apple silicon build
+on an Intel Mac. Start Docker Desktop, accept the service agreement in its
+window, and wait until `docker info` works.
 
 ### 2. The proxy
 
