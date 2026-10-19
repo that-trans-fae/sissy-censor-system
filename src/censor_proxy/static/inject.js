@@ -22,6 +22,9 @@
   const ORIGIN = "__CENSOR_ORIGIN__";
   const DEBUG = "__DEBUG__" === "true";
   const MAX_HEIGHT = Number("__MAX_HEIGHT__") || 720;  // video.max_height
+  const AD_SOURCES = JSON.parse("__AD_SOURCES__").flatMap((p) => {  // video.ad_sources
+    try { return [new RegExp(p, "i")]; } catch (_) { return []; }
+  });
   const VIDEO = "__VIDEO__" === "true";                  // video.enabled
   const PLACEHOLDERS = "__PLACEHOLDERS__" === "true";    // images.placeholders
   const PLACEHOLDER_MS = Number("__PLACEHOLDER_MS__");   // images.placeholder_delay_ms
@@ -185,46 +188,133 @@
       if (MANIFEST.test(u) && !manifests.includes(u)) manifests.push(u);
     } catch (_) { /* not a URL */ }
   }
+  // Some players get their manifests from an API rather than the page
+  // (Redtube's /media/hls?s=... answers with a JSON list of master.m3u8
+  // URLs, one per quality) and fetch the one they want only once playback
+  // starts, which never happens. JSON responses are read for manifest URLs.
+  const listed = new Set();         // manifest URLs named in JSON the page fetched
+  const JSON_MAX = 2 << 20;         // skip larger bodies
+  function scanText(text) {
+    if (typeof text !== "string" || text.length > JSON_MAX) return;
+    for (const u of inlineManifests(text)) listed.add(u);
+  }
+  const isJson = (type) => /\bjson\b/i.test(type || "");
   const origFetch = window.fetch;
   if (VIDEO && origFetch) {
     window.fetch = function (input, init) {
       note(typeof input === "string" ? input : input && input.url);
-      return origFetch.apply(this, arguments);
+      const p = origFetch.apply(this, arguments);
+      p.then((res) => {
+        if (isJson(res.headers.get("Content-Type")) &&
+            !(Number(res.headers.get("Content-Length")) > JSON_MAX)) {
+          res.clone().text().then(scanText, () => {});
+        }
+      }, () => {});
+      return p;
     };
   }
   const origOpen = XMLHttpRequest.prototype.open;
+  const xhrs = new WeakSet();
+  function xhrLoaded() {
+    try {
+      if (!isJson(this.getResponseHeader("Content-Type"))) return;
+      if (this.responseType === "" || this.responseType === "text") scanText(this.responseText);
+      else if (this.responseType === "json" && this.response) scanText(JSON.stringify(this.response));
+    } catch (_) { /* not readable */ }
+  }
   if (VIDEO) {
     XMLHttpRequest.prototype.open = function (method, url) {
       note(url);
+      if (!xhrs.has(this)) {
+        xhrs.add(this);
+        this.addEventListener("load", xhrLoaded);
+      }
       return origOpen.apply(this, arguments);
     };
   }
 
   // ---- Block playback until censored ------------------------------------
-  const origPlay = HTMLMediaElement.prototype.play;
-  if (VIDEO) {
-    HTMLMediaElement.prototype.play = function () {
-      if (this instanceof HTMLVideoElement && !ours.has(this)) {
+  // Checked by tag name, not instanceof: videos in same-origin frames come
+  // from another window's prototypes.
+  const XHTML = "http://www.w3.org/1999/xhtml";
+  const isVideo = (node) => node.localName === "video" && node.namespaceURI === XHTML;
+
+  // Patch a window's play(), and pause any video there that starts anyway
+  // (autoplay doesn't go through play()).
+  function blockPlayback(w) {
+    const proto = w.HTMLMediaElement.prototype, play = proto.play;
+    proto.play = function () {
+      if (isVideo(this) && !ours.has(this)) {
         guard(this);
         this.pause();
-        return Promise.reject(new DOMException("Paused until censored", "NotAllowedError"));
+        return Promise.reject(new w.DOMException("Paused until censored", "NotAllowedError"));
       }
-      return origPlay.apply(this, arguments);
+      return play.apply(this, arguments);
     };
+    w.addEventListener("play", (e) => {
+      if (isVideo(e.target) && !ours.has(e.target)) {
+        e.target.pause();
+        guard(e.target);
+      }
+    }, true);
   }
+  if (VIDEO) blockPlayback(window);
 
   // ---- Find videos and images, including inside shadow roots ------------
   const origAttachShadow = Element.prototype.attachShadow;
-  Element.prototype.attachShadow = function () {
-    const root = origAttachShadow.apply(this, arguments);
-    watch(root);
-    return root;
-  };
+  function watchShadows(w, attach) {
+    w.Element.prototype.attachShadow = function () {
+      const root = attach.apply(this, arguments);
+      watch(root);
+      return root;
+    };
+  }
+  watchShadows(window, origAttachShadow);
 
-  const SELECTOR = [VIDEO && "video", PLACEHOLDERS && "img"].filter(Boolean).join(", ");
+  // Frames without a URL of their own (srcdoc, about:blank, written by a
+  // script) are never fetched, so the proxy can't inject into them; ad
+  // networks play their videos in these (Redtube's in-page ads do). The
+  // script reaches into them from here instead, as soon as the iframe is
+  // added and again whenever it loads a new document. A same-origin frame
+  // keeps the window of its first about:blank document, so the patches made
+  // on insertion are already in place while the srcdoc parses. Frames from
+  // other origins, and same-origin ones with a URL, get their own injected
+  // copy (or are out of reach), so they are left alone: two copies patching
+  // one window would each block the other's player.
+  const frames = new WeakSet();
+  function frame(iframe) {
+    if (!frames.has(iframe)) {
+      frames.add(iframe);
+      iframe.addEventListener("load", () => enterFrame(iframe));
+    }
+    const src = (iframe.getAttribute("src") || "").trim();
+    if (!src || /^(about|javascript):/i.test(src) || iframe.hasAttribute("srcdoc")) enterFrame(iframe);
+  }
+
+  function enterFrame(iframe) {
+    let w, d;
+    try {
+      w = iframe.contentWindow;
+      d = w && w.document;
+    } catch (_) { return; }  // another origin
+    if (!d || !/^about:/.test(d.URL)) return;
+    if (!w[RAN]) {
+      Object.defineProperty(w, RAN, { value: true });
+      blockPlayback(w);
+      watchShadows(w, w.Element.prototype.attachShadow);
+    }
+    if (!d[RAN]) {
+      Object.defineProperty(d, RAN, { value: true });
+      watch(d);
+    }
+  }
+
+  const SELECTOR = [VIDEO && "video, iframe", PLACEHOLDERS && "img"].filter(Boolean).join(", ");
 
   function found(node) {
-    if (VIDEO && node instanceof HTMLVideoElement) guard(node);
+    if (VIDEO && isVideo(node)) guard(node);
+    else if (VIDEO && node.localName === "iframe") frame(node);
+    // Placeholders stay in this document: frames here are ad slots.
     else if (PLACEHOLDERS && node instanceof HTMLImageElement) trackImage(node);
   }
 
@@ -245,9 +335,9 @@
   }
 
   // ---- Cards -------------------------------------------------------------
-  // Each card lives right next to its video, in the same tree, so it shares
-  // whatever dialog, top layer or stacking context the video is in (a card in
-  // a separate page-level layer is hidden under modal dialogs). A closed
+  // Each card lives in its video's player (see playerBox()), in the same
+  // tree, so it shares whatever dialog or top layer the video is in (a card
+  // in a separate page-level layer is hidden under modal dialogs). A closed
   // shadow root keeps page CSS out.
   const HOST_CSS = "position:fixed;z-index:2147483647;display:block;margin:0;padding:0;" +
     "border:0;pointer-events:auto;contain:layout;";
@@ -328,7 +418,7 @@
       start(video, state);
     });
     card.append(brand, badge, msg, detail, button, bar);
-    const state = { card, host: makeHost(card), brand, badge, msg, detail, bar, button, player: null, jobId: null };
+    const state = { card, host: makeHost(card), brand, badge, msg, detail, bar, button, player: null, jobId: null, frames: 0, container: null };
     show(state, "idle");
     guarded.set(video, state);
     startPositioning();
@@ -384,14 +474,52 @@
     return null;
   }
 
+  // The outermost element around the video that is still about the
+  // video's box (the player), or null. The card goes in there, so it stacks
+  // above the player's own overlays (a big play button, controls; see
+  // stackAbove()), which sit
+  // in the same container but outside any stacking context around the video
+  // itself. It never climbs out of a dialog, popover or fullscreen element,
+  // so it stays in their layer.
+  const SAME_BOX = 1.15;
+  function playerBox(video, r) {
+    let box = null;
+    for (let node = video.parentElement; node && node !== node.ownerDocument.body &&
+         node !== node.ownerDocument.documentElement; node = node.parentElement) {
+      const b = node.getBoundingClientRect();
+      if (b.left > r.left + 1 || b.top > r.top + 1 || b.right < r.right - 1 || b.bottom < r.bottom - 1 ||
+          b.width > r.width * SAME_BOX || b.height > r.height * SAME_BOX) break;
+      box = node;
+      if (node.localName === "dialog" || node.matches(":popover-open, :fullscreen")) break;
+    }
+    return box;
+  }
+
+  // A z-index just above everything in the player. Not the maximum: unless
+  // the player is a stacking context of its own, the card stacks with the
+  // rest of the page, and the page's modals (an age check over the player)
+  // must stay on top of it.
+  function stackAbove(box) {
+    let z = 0;
+    for (const e of box.querySelectorAll("*")) {
+      if (e.localName === "censor-proxy-card") continue;
+      const v = parseInt(getComputedStyle(e).zIndex, 10);
+      if (v > z) z = v;
+    }
+    return Math.min(z + 1, 2147483647);
+  }
+
   // Keep each card over its video. Cards for videos that are gone or
   // can't be placed are hidden.
   function position() {
     for (const [video, state] of guarded) {
       const host = state.host;
-      const r = video.isConnected ? coverRect(video) : null;
-      const visible = r && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
-      if (!video.isConnected) {
+      // A frame that loaded a new document leaves the old one's videos
+      // connected to a document with no window.
+      const view = video.isConnected && video.ownerDocument.defaultView;
+      const r = view ? coverRect(video) : null;
+      const visible = r && r.bottom > 0 && r.right > 0 && r.top < view.innerHeight && r.left < view.innerWidth;
+      if (!view) {
         // The page removed the video (some sites recreate players on every
         // hover); drop its card so they don't pile up.
         if (state.player) state.player.pause();
@@ -404,8 +532,18 @@
         host.style.setProperty("display", "none", "important");
         continue;
       }
-      if (host.previousSibling !== video) video.after(host);  // (re)attach next to the video
+      // Where the card goes is looked up again now and then: players wrap
+      // and rebuild their markup while they load.
       const s = host.style;
+      if (++state.frames % 30 === 1) {
+        state.container = playerBox(video, r);
+        const z = state.container ? String(stackAbove(state.container)) : "2147483647";
+        if (z !== state.z) s.setProperty("z-index", state.z = z, "important");
+      }
+      const box = state.container;
+      if (box && box.isConnected) {
+        if (host.parentNode !== box) box.appendChild(host);
+      } else if (host.previousSibling !== video) video.after(host);
       s.setProperty("display", "block", "important");
       s.setProperty("width", r.width + "px", "important");
       s.setProperty("height", r.height + "px", "important");
@@ -683,43 +821,60 @@
     return m ? `https://v.redd.it/${m[1]}/HLSPlaylist.m3u8` : null;
   }
 
-  // Players that fetch their manifest only once playback starts (Pornhub's)
-  // never show it to note(); the page's inline config usually lists it,
-  // often JSON-escaped and once per quality. Picks the tallest rendition the
-  // proxy won't scale down (heights read from names like 720P_4000K), else
-  // the smallest.
+  // Manifest URLs written out in text (inline scripts, JSON), often
+  // JSON-escaped.
   const INLINE_MANIFEST = /https?:\\?\/\\?\/[^"'\s<>]+?\.(?:m3u8|mpd)(?:\?[^"'\s<>]*)?(?=["'\s<>]|$)/gi;
-  function pageManifest() {
-    const found = new Set();
-    for (const s of document.querySelectorAll("script:not([src])")) {
-      for (const m of s.textContent.matchAll(INLINE_MANIFEST)) {
-        const u = httpUrl(m[0].replace(/\\\//g, "/").replace(/\\u0026/gi, "&"));
-        if (u) found.add(u);
-      }
+  function inlineManifests(text) {
+    const found = [];
+    for (const m of text.matchAll(INLINE_MANIFEST)) {
+      const u = httpUrl(m[0].replace(/\\\//g, "/").replace(/\\u0026/gi, "&"));
+      if (u) found.push(u);
     }
+    return found;
+  }
+
+  // Of manifests listed once per quality, the tallest rendition the proxy
+  // won't scale down (heights read from names like 720P_4000K), else the
+  // smallest.
+  function bestRendition(found) {
     const height = (u) => +((/(?:^|[^0-9])(\d{3,4})p(?![a-z])/i.exec(new URL(u).pathname) || [])[1] || 0);
     const urls = [...found].sort((a, b) => height(a) - height(b));
     const fits = urls.filter((u) => height(u) <= MAX_HEIGHT);
     return fits.length ? fits[fits.length - 1] : urls[0] || null;
   }
 
+  // Players that fetch their manifest only once playback starts (Pornhub's)
+  // never show it to note(); the page's inline config usually lists it.
+  function pageManifest() {
+    const found = new Set();
+    for (const s of document.querySelectorAll("script:not([src])")) {
+      for (const u of inlineManifests(s.textContent)) found.add(u);
+    }
+    return bestRendition(found);
+  }
+
+  // An ad playing in the page's own player isn't the video (video.ad_sources).
+  const notAd = (u) => u && !AD_SOURCES.some((re) => re.test(u)) ? u : null;
+  const lastNotAd = (urls) => urls.filter(notAd).pop() || null;
+
   function findSource(video) {
     // Raw attributes: the .src properties turn src="" into the page URL.
     const source = video.querySelector("source[src]");
-    const direct = httpUrl(video.currentSrc) || httpUrl(video.getAttribute("src")) ||
-      httpUrl(source && source.getAttribute("src"));
-    return attributeUrl(video, MANIFEST) ||   // a player's manifest beats any single file
+    const direct = notAd(httpUrl(video.currentSrc)) || notAd(httpUrl(video.getAttribute("src"))) ||
+      notAd(httpUrl(source && source.getAttribute("src")));
+    return notAd(attributeUrl(video, MANIFEST)) ||   // a player's manifest beats any single file
       siteHint(direct) ||
       direct ||
-      attributeUrl(video, FILE) ||
-      (manifests.length ? manifests[manifests.length - 1] : null) ||
+      notAd(attributeUrl(video, FILE)) ||
+      lastNotAd(manifests) ||
+      bestRendition([...listed].filter(notAd)) ||
       pageManifest();
   }
 
   // ---- Censoring -------------------------------------------------------
   async function start(video, state) {
     const src = findSource(video);
-    report("start", { ...describe(video), found: src, manifests: manifests.slice(-3) });
+    report("start", { ...describe(video), found: src, manifests: manifests.slice(-3), listed: listed.size });
     if (!src) return show(state, "unavailable");
     show(state, "preparing");
     try {

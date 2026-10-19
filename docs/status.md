@@ -49,6 +49,13 @@ Last updated Oct 19, 2026.
   global or script tag left in the page, Referer from the `Origin` header,
   a queue cap and per-origin rate limit on job starts, and an ffmpeg
   protocol whitelist. Tested with pytest only, not yet in a browser
+- Redtube player (Oct 19, 2026): video cards stack above the player's
+  own overlays but under page modals, ad videos in `srcdoc`/`about:blank`
+  frames are paused and covered, manifests listed in JSON API responses are
+  found, and preroll ads (`video.ad_sources`) are never taken as the source.
+  Checked headlessly through the proxy (card topmost over the whole player,
+  srcdoc ad paused, four manifests listed) and confirmed playing in the
+  browser
 - Injection only before the page's first `<body>`/`<script>`, no body
   opt-out marker, the admin panel's Video tab explains the injection
   trade-off, and the compose service runs read-only with no capabilities

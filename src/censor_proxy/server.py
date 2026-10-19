@@ -75,6 +75,7 @@ class InternalServer:
                   "__BRAND_NAME__": self.cfg.video.brand_name,
                   "__DEBUG__": "true" if self.cfg.video.debug else "false",
                   "__MAX_HEIGHT__": str(self.cfg.video.max_height),
+                  "__AD_SOURCES__": json.dumps(list(self.cfg.video.ad_sources)),
                   "__VIDEO__": "true" if self.cfg.video.enabled else "false",
                   "__PLACEHOLDERS__": "true" if self.cfg.images.placeholders else "false",
                   "__PLACEHOLDER_MS__": str(self.cfg.images.placeholder_delay_ms),

@@ -293,6 +293,12 @@ video:
   # our script, so narrow this to limit that.
   hosts:
     - '.*'
+  # Regexes (JavaScript syntax) for video URLs that are ads, never taken as
+  # a video's source. Players that run a preroll ad in the page's own <video>
+  # (Pornhub's and Redtube's) would otherwise have the ad censored instead
+  # of the video; the source is then looked for in the player's manifests.
+  ad_sources:
+    - '/pre_videos/'
   # Model for video frames. null uses the bundled 320n; 640m is far too slow
   # for video (~10 s of work per second of video).
   model_path: null

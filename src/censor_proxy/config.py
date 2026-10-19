@@ -151,6 +151,7 @@ class DataUrisConfig:
 class VideoConfig:
     enabled: bool
     hosts: tuple[str, ...]
+    ad_sources: tuple[str, ...]
     model_path: str | None
     model_resolution: int
     tiling: bool
@@ -396,6 +397,7 @@ def _build(raw: dict[str, Any]) -> Config:
             svg_depth=int(raw["data_uris"]["svg_depth"]),
         ),
         "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ()),
+                                "ad_sources": tuple(raw["video"]["ad_sources"] or ()),
                                 "source_protocols": tuple(raw["video"]["source_protocols"] or ())}),
         "video_attribution": VideoAttributionConfig(**{
             **raw["video_attribution"],
@@ -455,7 +457,8 @@ def _validate(cfg: Config) -> None:
     if len(cfg.censor.fill_color) != 3:
         raise ConfigError("censor.fill_color must be [R, G, B]")
     for key, patterns in (("whitelist.builtin", cfg.whitelist.builtin),
-                          ("video.hosts", cfg.video.hosts)):
+                          ("video.hosts", cfg.video.hosts),
+                          ("video.ad_sources", cfg.video.ad_sources)):
         for pattern in patterns:
             try:
                 re.compile(pattern)
