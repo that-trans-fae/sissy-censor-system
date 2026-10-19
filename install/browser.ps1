@@ -1,8 +1,9 @@
 <#
 Sissy Censor System: dedicated browser installer for Windows.
 
-Installs Docker Desktop, Chromium and the sqlite3 tool with winget, pulls
-the proxy image from Docker Hub and starts it from %USERPROFILE%\scs, adds
+Installs Docker Desktop and the sqlite3 tool with winget and Chromium from
+Hibbiki's GitHub releases (the build winget's Hibbiki.Chromium packages),
+pulls the proxy image from Docker Hub and starts it from %USERPROFILE%\scs, adds
 a scheduled task that checks for updates at each sign-in (scs-update.ps1,
 from the image), and adds a "Sissy Browser" shortcut to the Start menu and desktop:
 a separate Chromium profile that always goes through the proxy and trusts
@@ -46,10 +47,21 @@ $Uninstall    = $Uninstall -or $env:SCS_UNINSTALL -eq '1'
 $BrowserName = 'Sissy Browser'
 $ProxyHost = '127.0.0.1'
 $ProxyPort = 8080
+# Google search goes around the proxy. Google answers a Chromium that reaches
+# it over TCP instead of QUIC (HTTP/3) with a CAPTCHA on every search, and an
+# HTTP proxy can't carry QUIC. The browser connects directly and resolves the
+# host to Google's SafeSearch-locking address itself (docs/decisions.md).
+$ProxyBypass = 'www.google.com'
+$ResolverRules = 'MAP www.google.com forcesafesearch.google.com'
 $CaPem = Join-Path $ScsDir 'mitmproxy\mitmproxy-ca-cert.pem'
 $UpdateTask = 'Sissy Censor System update'
 $DockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
-$ChromiumWingetId = 'Hibbiki.Chromium'
+$ChromiumWingetId = 'Hibbiki.Chromium'   # for the uninstall; the install fetches the release itself
+$ChromiumReleaseApi = 'https://api.github.com/repos/Hibbiki/chromium-win64/releases/latest'
+$ChromiumLatestUrl = 'https://github.com/Hibbiki/chromium-win64/releases/latest/download/mini_installer.exe'
+# Where winget puts a package whose manifest says "portable" (Hibbiki.Chromium
+# 155.0.8059.85 did, Oct 2026): the installer copied aside, not run.
+$ChromiumPortableDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Hibbiki.Chromium_Microsoft.Winget.Source_8wekyb3d8bbwe'
 # The profile certificate store (ServerCertificate) exists from Chromium
 # 134; 134-136 only create it with this feature on (it is on by default from
 # 137, and later builds ignore the name), so it goes on every start.
@@ -274,17 +286,47 @@ function Find-Chromium {
 function Chromium-Version($exe) {
     [version]((Get-Item $exe).VersionInfo.ProductVersion -replace '[^0-9.].*$')
 }
+# Hibbiki's Chromium build from its GitHub release: the installer and its
+# SHA-256 from the release's asset list (the stable latest-download URL,
+# unverified, if the API is unreachable), run per user, or system-level
+# (an elevation prompt) to update a Chromium in Program Files. Not winget:
+# its Hibbiki.Chromium manifest shipped as "portable" in Oct 2026, which
+# installs nothing.
+function Install-ChromiumBuild([bool]$systemLevel) {
+    $ProgressPreference = 'SilentlyContinue'   # the progress bar makes Invoke-WebRequest crawl
+    $url = $ChromiumLatestUrl; $digest = $null; $tag = ''
+    try {
+        $rel = Invoke-RestMethod -Uri $ChromiumReleaseApi -UseBasicParsing
+        $asset = $rel.assets | Where-Object { $_.name -eq 'mini_installer.exe' } | Select-Object -First 1
+        if ($asset) { $url = $asset.browser_download_url; $digest = "$($asset.digest)" -replace '^sha256:', ''; $tag = " $($rel.tag_name)" }
+    } catch { Warn "could not read the Chromium release list ($($_.Exception.Message)); the latest build is downloaded unverified" }
+    Log "Downloading Chromium$tag (about 130 MB)"
+    $exe = Join-Path $env:TEMP 'scs-chromium-mini_installer.exe'
+    Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+    if ($digest) {
+        $have = (Get-FileHash -Algorithm SHA256 $exe).Hash
+        if ($have -ne $digest.ToUpper()) { Remove-Item -Force $exe; Die "the Chromium download's SHA-256 ($have) is not the release's ($digest)" }
+    }
+    Log $(if ($systemLevel) { 'Installing Chromium (it asks to run as administrator)' } else { 'Installing Chromium' })
+    $opts = @('--do-not-launch-chrome')
+    if ($systemLevel) { Start-Process -Wait -Verb RunAs -FilePath $exe -ArgumentList ($opts + '--system-level') }
+    else { Start-Process -Wait -FilePath $exe -ArgumentList $opts }
+    Remove-Item -Force -ErrorAction SilentlyContinue $exe
+}
 # The profile certificate store needs Chromium 134; an older one that is
-# already installed is updated (winget install upgrades what it finds).
+# already installed is updated in place.
 function Install-Chromium {
     $exe = Find-Chromium
     if (-not $exe) {
-        Log 'Installing Chromium'
-        Winget-Install $ChromiumWingetId
+        if (Test-Path $ChromiumPortableDir) {
+            Log "Removing winget's stray Hibbiki.Chromium record (its manifest installed nothing)"
+            winget uninstall -e --id $ChromiumWingetId --accept-source-agreements --silent | Out-Null
+        }
+        Install-ChromiumBuild $false
         $exe = Find-Chromium
     } elseif ((Chromium-Version $exe).Major -lt $ChromiumMinVersion) {
-        Log "Updating Chromium $(Chromium-Version $exe) at $exe ($ChromiumMinVersion or newer is needed)"
-        Winget-Install $ChromiumWingetId
+        Log "Chromium $(Chromium-Version $exe) at $exe is too old ($ChromiumMinVersion or newer is needed)"
+        Install-ChromiumBuild ($exe -like "$env:ProgramFiles\*" -or $exe -like "${env:ProgramFiles(x86)}\*")
         $exe = Find-Chromium
     }
     if (-not $exe) { Die 'could not find chrome.exe after installing Chromium; set SCS_CHROMIUM_EXE to its path' }
@@ -406,6 +448,7 @@ function Install-Shortcuts($chromium) {
         $lnk = $shell.CreateShortcut($path)
         $lnk.TargetPath = $chromium
         $lnk.Arguments = "--user-data-dir=`"$ProfileDir`" --proxy-server=$ProxyHost`:$ProxyPort " +
+                         "--proxy-bypass-list=$ProxyBypass `"--host-resolver-rules=$ResolverRules`" " +
                          "--no-first-run --no-default-browser-check $ChromiumFeatures"
         $lnk.WorkingDirectory = Split-Path $chromium
         $lnk.IconLocation = "$IconPath,0"

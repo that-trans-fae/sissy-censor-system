@@ -22,7 +22,8 @@ Hub (`SCS_IMAGE_REPO` points elsewhere).
 ## Dedicated browser
 
 Installs Chromium (snap or distribution package on Linux, Homebrew cask on
-macOS, winget on Windows) and adds a **Sissy Browser** launcher with its
+macOS, Hibbiki's build from its GitHub release on Windows, verified against
+the release's SHA-256) and adds a **Sissy Browser** launcher with its
 own icon (`docs/brand/browser-icon.svg`, shipped in the image). It opens a separate profile with
 `--proxy-server=127.0.0.1:8080` and trusts the proxy's CA in that profile's
 own certificate store (the "Installed by you" list in
@@ -36,6 +37,15 @@ the bookmark bar shown and the admin panel (`http://localhost:8082/admin`)
 on it; rerunning the installer adds the bookmark to an existing profile if
 it is missing (close the browser first). On Linux and macOS the launcher
 also starts the proxy container if Docker is up.
+
+Google search is the one site the launcher takes around the proxy
+(`--proxy-bypass-list=www.google.com`): Google answers a Chromium that
+reaches it over TCP instead of HTTP/3 with a CAPTCHA on every search, and
+an HTTP proxy can't carry HTTP/3. The browser resolves `www.google.com` to
+Google's SafeSearch-locking address instead (`--host-resolver-rules`), so
+results are filtered at Google's end and the setting can't be turned off
+from the page; Image Search thumbnails still load through the proxy and
+are censored.
 
 Linux and macOS:
 

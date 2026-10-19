@@ -228,15 +228,22 @@ automatic updates off there, or pin a version by setting the channel in
 `.env` to a tag such as `thattransfae/scs:1.2.0`.
 
 **4. Chromium.** The snap or distribution package on Linux, the Homebrew
-cask on macOS, the winget package on Windows (plus the sqlite3 tool, which
+cask on macOS, Hibbiki's build from its GitHub release on Windows, checked
+against the release's SHA-256 (plus the sqlite3 tool from winget, which
 the Windows installer uses to write the certificate store). If Chromium is
-already installed it is reused.
+already installed it is reused, or updated if it is older than 134.
 
 **5. The Sissy Browser launcher and profile.** A launcher that starts
 Chromium with a separate profile and `--proxy-server=127.0.0.1:8080`, and
 trusts the proxy's CA inside that profile's own certificate store (the
 "Installed by you" list in `chrome://certificate-manager`). On Linux and
 macOS the launcher also starts the proxy container if it is not running.
+Google search is the one site it reaches directly rather than through the
+proxy: Google challenges a Chromium that can't use HTTP/3 with a CAPTCHA on
+every search, and an HTTP proxy can't carry HTTP/3. The launcher points
+`www.google.com` at Google's SafeSearch-locking address instead, so results
+are filtered at Google's end, and the Image Search thumbnails still load
+through the proxy and are censored.
 
 | Platform | Launcher | Profile |
 | --- | --- | --- |
