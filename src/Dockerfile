@@ -1,3 +1,28 @@
+# The macOS app icon, built here because a Mac without the developer tools
+# has no SVG renderer but Quick Look, which flattens the transparent corners
+# onto white. Apple's layout: the tile at 824 of 1024 px, centred, with a
+# soft shadow.
+FROM python:3.13-slim AS icon
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends librsvg2-bin \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir pillow
+COPY --from=brand browser-icon.svg /icon/
+WORKDIR /icon
+RUN python - <<'PY'
+import re, subprocess
+from PIL import Image
+svg = open("browser-icon.svg").read()
+tile = re.sub(r"<svg\b[^>]*>", '<svg x="100" y="100" width="824" height="824" viewBox="0 0 256 256">', svg, count=1)
+open("mac.svg", "w").write(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">'
+    '<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">'
+    '<feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.3"/></filter></defs>'
+    f'<g filter="url(#shadow)">{tile}</g></svg>')
+subprocess.run(["rsvg-convert", "-w", "1024", "-h", "1024", "mac.svg", "-o", "mac.png"], check=True)
+Image.open("mac.png").save("browser-icon.icns")
+PY
+
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -41,11 +66,13 @@ COPY censor_proxy/ censor_proxy/
 COPY censor.py .
 
 # What the host needs, copied out by the installer and by scs-update after
-# each update: the compose file, the updaters and the browser icon. The icon
+# each update: the compose file, the updaters and the browser icon (and its
+# macOS .icns, from the icon stage above). The icon
 # comes from docs/brand through the "brand" build context (compose.yaml and
 # tools/release.sh pass it; by hand: --build-context brand=../docs/brand).
 COPY dist/ dist/
 COPY --from=brand browser-icon.svg dist/
+COPY --from=icon /icon/browser-icon.icns dist/
 
 EXPOSE 8080 8082
 ENV CENSOR_CONFIG=/config/config.yaml

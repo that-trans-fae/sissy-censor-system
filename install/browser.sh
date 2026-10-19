@@ -54,6 +54,8 @@ PROXY_PORT=8080
 PROXY_BYPASS=www.google.com
 CA_PEM="$SCS_DIR/mitmproxy/mitmproxy-ca-cert.pem"
 ICON_SVG="$SCS_DIR/browser-icon.svg"
+ICON_ICNS="$SCS_DIR/browser-icon.icns"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 UPDATE_UNIT=scs-update
 UPDATE_AGENT=local.scs.update
 ADMIN_URL="http://localhost:8082/admin"
@@ -708,15 +710,21 @@ install_launcher_macos() {
 </dict>
 </plist>
 EOF
-  # Rasterise the SVG with Quick Look, then build the .icns with iconutil.
+  # The image ships the .icns (built from the SVG to Apple's icon layout).
+  # Older images have only the SVG: rasterise it with Quick Look, which puts
+  # it on white, and build the .icns with iconutil.
   local tmp; tmp=$(mktemp -d)
   local png=""
-  if qlmanage -t -s 1024 -o "$tmp" "$ICON_SVG" >/dev/null 2>&1 && [ -f "$tmp/browser-icon.svg.png" ]; then
+  if [ -s "$ICON_ICNS" ]; then
+    cp "$ICON_ICNS" "$app/Contents/Resources/icon.icns"
+  elif qlmanage -t -s 1024 -o "$tmp" "$ICON_SVG" >/dev/null 2>&1 && [ -f "$tmp/browser-icon.svg.png" ]; then
     png="$tmp/browser-icon.svg.png"
   elif have rsvg-convert; then
     rsvg-convert -w 1024 -h 1024 "$ICON_SVG" -o "$tmp/icon.png" && png="$tmp/icon.png"
   fi
-  if [ -n "$png" ]; then
+  if [ -s "$app/Contents/Resources/icon.icns" ]; then
+    :
+  elif [ -n "$png" ]; then
     mkdir -p "$tmp/icon.iconset"
     local size
     for size in 16 32 128 256 512; do
@@ -730,6 +738,8 @@ EOF
   fi
   rm -rf "$tmp"
   touch "$app"
+  # Have the Dock and Finder pick up a replaced icon.
+  "$LSREGISTER" -f "$app" >/dev/null 2>&1 || true
 }
 
 # Seeds the profile so the bookmark bar is shown with the admin panel on it.
