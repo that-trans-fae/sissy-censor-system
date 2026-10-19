@@ -71,7 +71,7 @@ def test_clean_body_untouched(cfg):
 
 
 def test_small_and_non_image_uris_skipped(make_config):
-    cfg = make_config("cache: {max_entries: 0}\n")  # default 4 KB size floor
+    cfg = make_config("cache: {max_entries: 0}\n")  # default 1 KB size floor
     fake = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=BOX)])
     tiny = io.BytesIO()
     Image.new("RGB", (8, 8)).save(tiny, "PNG")

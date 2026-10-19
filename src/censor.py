@@ -64,12 +64,20 @@ class CensorAddon:
                 "video_jobs": self.jobs.active() if self.jobs else 0}
 
     def request(self, flow: http.HTTPFlow) -> None:
+        if self.cfg is None:
+            return
         # The proxy's own host is served by the internal server.
-        if self.cfg and flow.request.pretty_host == self.cfg.proxy.health_host:
+        if flow.request.pretty_host == self.cfg.proxy.health_host:
             flow.metadata["censor_internal"] = True
             flow.request.scheme = "http"
             flow.request.host = "127.0.0.1"
             flow.request.port = self.cfg.proxy.internal_port
+            return
+        accept = flow.request.headers.get("Accept")
+        if accept and self.cfg.images.strip_accept:
+            stripped = strip_accept(accept, self.cfg.images.strip_accept)
+            if stripped != accept:
+                flow.request.headers["Accept"] = stripped
 
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         """Buffer only the bodies the addon inspects; stream everything else.
@@ -81,6 +89,8 @@ class CensorAddon:
             return
         if flow.metadata.get("censor_internal"):
             flow.response.stream = True  # video streams must not be buffered
+        elif self._is_video_document(flow):
+            self._replace_with_video_page(flow)
         elif _is_image(flow):
             # Always buffered: oversized images fail closed in censor_bytes.
             flow.response.stream = False
@@ -101,6 +111,36 @@ class CensorAddon:
             self._inject(flow)
         if self._is_data_uri_text(flow):
             await self._censor_text(flow)
+
+    def _is_video_document(self, flow: http.HTTPFlow) -> bool:
+        """A video opened directly as a page or iframe."""
+        dest = flow.request.headers.get("Sec-Fetch-Dest", "")
+        return (self.cfg.video.enabled and dest in ("document", "iframe", "frame")
+                and flow.response.status_code in (200, 206)
+                and _mime(flow).startswith("video/")
+                and any(p.search(flow.request.pretty_host) for p in self.video_hosts))
+
+    def _replace_with_video_page(self, flow: http.HTTPFlow) -> None:
+        # Headers go to the client as soon as streaming starts, so the swap
+        # happens here: new headers, and a stream function that emits our
+        # page once and drops the original body.
+        page = inject.video_page(flow.request.pretty_url, f"https://{self.cfg.proxy.health_host}")
+        flow.response.status_code = 200
+        flow.response.reason = "OK"
+        flow.response.headers.clear()
+        flow.response.headers["Content-Type"] = "text/html; charset=utf-8"
+        flow.response.headers["Content-Length"] = str(len(page))
+        flow.response.headers["Cache-Control"] = "no-store"
+        sent = False
+
+        def emit(chunk: bytes) -> bytes:
+            nonlocal sent
+            if sent:
+                return b""
+            sent = True
+            return page
+        flow.response.stream = emit
+        log.info("replaced directly opened video with control page: %s", flow.request.pretty_host)
 
     def _is_video_page(self, flow: http.HTTPFlow) -> bool:
         # Browsers say what a request is for; only documents and frames get
@@ -127,9 +167,8 @@ class CensorAddon:
         loop = asyncio.get_running_loop()
         self.in_flight += 1
         try:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(self.pool, self.censor.censor_bytes, data, mime),
-                timeout=self.cfg.censor.timeout_seconds)
+            result = await self._run_timed(self.cfg.censor.timeout_seconds,
+                                           self.censor.censor_bytes, data, mime)
         except Exception as e:
             reason = _failure_reason(e)
             log.warning("detection failed for %s: %s", flow.request.pretty_host, reason)
@@ -155,10 +194,10 @@ class CensorAddon:
         try:
             # Each image gets the per-image budget; one slow image shouldn't
             # cost the rest of the page.
-            result = await asyncio.wait_for(
-                loop.run_in_executor(self.pool, lambda: datauri.censor_data_uris(
-                    body, self.censor, fail_closed=fail_closed, matches=matches)),
-                timeout=self.cfg.censor.timeout_seconds * len(matches))
+            result = await self._run_timed(
+                self.cfg.censor.timeout_seconds * len(matches),
+                lambda: datauri.censor_data_uris(body, self.censor, fail_closed=fail_closed,
+                                                 matches=matches))
         except Exception as e:
             reason = _failure_reason(e)
             log.warning("data-URI detection failed for %s: %s", flow.request.pretty_host, reason)
@@ -175,10 +214,32 @@ class CensorAddon:
             self.detections.record(r, flow.request.pretty_host, flow.request.pretty_url, mime,
                                    source="data-uri")
 
+    async def _run_timed(self, timeout: float, fn, *args):
+        """Run fn on the worker pool. The timeout starts when a worker picks
+        the job up, so images queued behind slow ones (big GIFs) aren't
+        failed closed just for waiting."""
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+
+        def job():
+            loop.call_soon_threadsafe(started.set)
+            return fn(*args)
+        future = loop.run_in_executor(self.pool, job)
+        await started.wait()
+        return await asyncio.wait_for(future, timeout=timeout)
+
     def _is_data_uri_text(self, flow: http.HTTPFlow) -> bool:
         return (self.cfg.data_uris.enabled and flow.response is not None
                 and flow.response.status_code == 200
                 and _mime(flow) in self.cfg.data_uris.content_types)
+
+
+def strip_accept(accept: str, remove: frozenset[str]) -> str:
+    """Drop media types the censor can't decode from an Accept header, so a
+    server that negotiates image formats picks one it can."""
+    kept = [part for part in accept.split(",")
+            if part.split(";")[0].strip().lower() not in remove]
+    return ",".join(kept).strip() or "*/*"
 
 
 def _mime(flow: http.HTTPFlow) -> str:

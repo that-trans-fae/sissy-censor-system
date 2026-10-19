@@ -31,6 +31,7 @@ src/censor_proxy/detection_log.py  JSONL detection log
 src/config/config.yaml         user overrides, mounted at /config
 src/tools/draw_boxes.py        box-draw review of the samples
 src/tests/                     pytest; fixtures/expected-<model>.json
+docs/brand/                    mark, README banners, palette
 docs/samples/{censor,mixed,uncensor}/  sample images (not in git)
 ```
 
@@ -58,8 +59,9 @@ a 640m fixture. Add `--deselect tests/test_samples.py` for a quick unit-test
 run.
 
 The test command mounts the working tree, so code edits don't need a rebuild;
-dependency or Dockerfile changes do. Restart the compose container after
-editing code or `config/config.yaml`.
+dependency or Dockerfile changes do. The compose container runs the code
+baked into the image, so rebuild it (`docker compose up -d --build`) after
+editing code; a restart is enough for `config/config.yaml`.
 
 Docker is Docker Desktop (a VM): bind mounts must be under `/home`, so
 `/tmp` and the scratchpad can't be mounted. Pipe throwaway scripts in on

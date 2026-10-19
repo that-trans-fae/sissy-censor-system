@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from .imaging import Censor, ScanResult
 
-DATA_URI = re.compile(rb"data:image\\?/(png|jpe?g|gif|webp);base64,((?:[A-Za-z0-9+=]|\\?/)+)")
+DATA_URI = re.compile(rb"data:image\\?/(png|jpe?g|gif|webp|avif);base64,((?:[A-Za-z0-9+=]|\\?/)+)")
 
 
 @dataclass

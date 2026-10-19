@@ -5,7 +5,7 @@ censor:
   style: gaussian          # gaussian | pixelate | solid
 
 logging:
-  level: info              # off | info (hostnames) | debug (full URLs)
+  level: debug             # off | info (hostnames) | debug (full URLs); debug while testing
 
 proxy:
   # Hosts that bypass TLS interception (regexes on host:port), e.g. for
@@ -15,3 +15,7 @@ proxy:
     # policy. No page images come from them.
     - '^update\.googleapis\.com:'
     - '^optimizationguide-pa\.googleapis\.com:'
+
+video:
+  # Temporarily on while debugging video pages; logs page URLs.
+  debug: true

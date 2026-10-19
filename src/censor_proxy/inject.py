@@ -11,6 +11,7 @@ not added otherwise, because its presence would disable a policy's
 
 from __future__ import annotations
 
+import html
 import re
 import secrets
 
@@ -109,3 +110,21 @@ def inject_html(body: bytes, tag: bytes) -> bytes | None:
 
 def new_nonce() -> str:
     return secrets.token_urlsafe(18)
+
+
+def video_page(url: str, origin: str) -> bytes:
+    """Stand-in for a video opened directly (the browser would otherwise play
+    it in its own media page, where nothing can be injected): the same video
+    under the injected control. preload=none so nothing is fetched until a
+    censored copy is requested."""
+    src = html.escape(url, quote=True)
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Video</title>
+{script_tag(origin, None).decode()}
+<style>
+html, body {{ margin: 0; height: 100%; background: #0e0e0e; }}
+video {{ display: block; width: 100vw; height: 100vh; object-fit: contain; }}
+</style></head>
+<body><video src="{src}" preload="none" controls></video></body></html>
+""".encode()

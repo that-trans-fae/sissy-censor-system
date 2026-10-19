@@ -82,14 +82,25 @@ censor:
   # (true) or deliver it unmodified (false).
   fail_closed: true
   timeout_seconds: 20
-  # Re-encode quality for lossy formats (JPEG, lossy WebP).
+  # Re-encode quality for lossy formats (JPEG, lossy WebP, AVIF).
   quality: 90
+  # AVIF encoder speed, 0 (slowest, smallest) to 10 (fastest). 8 re-encodes
+  # a 720p image in ~60 ms.
+  avif_speed: 8
 
 images:
   # Images smaller than this many bytes, or with a shorter side under
   # min_side_px, pass through unscanned.
-  size_floor_bytes: 4096
+  size_floor_bytes: 1024
   min_side_px: 64
+  # Formats removed from the Accept header of image requests, so servers
+  # that negotiate formats (image CDNs) send one the censor can decode.
+  # Chromium asks for JPEG XL, which Pillow can't read.
+  strip_accept:
+    - image/jxl
+    - image/heic
+    - image/heif
+    - image/jp2
   # Larger images, or ones that would take more than max_decoded_bytes of
   # memory to decode (width x height x 4 x frames), aren't scanned: they are
   # delivered as their first frame, fully censored. Nothing streams through
@@ -148,7 +159,17 @@ video:
   ready_seconds: 3
   # Longer videos are refused (they stay covered).
   max_duration_seconds: 1800
+  # Jobs beyond this wait in a queue ("Waiting for another video").
   max_concurrent_jobs: 1
+  # A job nobody is streaming or polling for this long (the tab crashed or
+  # lost its connection) is cancelled, so it doesn't hold a slot. Closing or
+  # leaving the page cancels at once. Playing it again starts over. Pages
+  # check in every 2 s, so keep this above that.
+  abandon_seconds: 5
+  # A running job whose video has been paused or in a background tab this
+  # long gives its slot to a queued video someone is waiting on. With
+  # nothing queued it keeps working ahead.
+  idle_seconds: 5
   # Allow sources on loopback or private networks. Off so pages can't use
   # the proxy to reach the local network; turn on for a LAN media server.
   allow_private_sources: false
@@ -157,7 +178,10 @@ video:
   cache_dir: /tmp/censor-video
   cache_max_bytes: 2147483648
   # Name shown on the injected control; its look is set in static/inject.js.
-  brand_name: Censor
+  brand_name: Sissy Censor System
+  # The injected script reports what it sees (videos found, their size,
+  # source URLs, errors) to the proxy log. Includes page URLs.
+  debug: false
 
 proxy:
   # Regexes matched against host:port. Matching hosts bypass TLS

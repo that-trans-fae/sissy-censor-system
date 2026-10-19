@@ -49,7 +49,14 @@ proxy
      URL), the script wraps `fetch`/`XMLHttpRequest` before the player loads
      and records `.m3u8`/`.mpd` manifest URLs, matching them to the video.
      Site-specific hints are allowed where they're cheap (Reddit's player
-     element carries its HLS URL in an attribute).
+     element carries its HLS URL in an attribute). Raw `src` attributes are
+     read, not the `.src` property, which turns an empty `src=""` into the
+     page's own URL; the page URL is never taken as a source.
+   - Last resort, for players that fetch their manifest only once playback
+     starts (Pornhub's): manifest URLs written into the page's inline
+     scripts, JSON-escaped or not. When there is one per quality, the
+     tallest at or under `video.max_height` (read from names like
+     `720P_4000K`) wins.
    - On click, asks the proxy to start a job, then swaps in a plain
      `<video controls>` pointing at the job's stream, and shows progress
      until playback can start.
@@ -68,6 +75,24 @@ proxy
      starts before the job finishes; audio is copied.
    - Finished outputs are cached by source URL so replays and seeks are
      instant; the cache is size-capped.
+   - Jobs run `video.max_concurrent_jobs` at a time; the rest queue, and
+     the control says so. The script checks in every 2 s, saying whether
+     the video is wanted now (being prepared or playing in a visible tab)
+     or idle (paused, ended, background tab), and immediately on pause and
+     tab switches.
+     - Closing or leaving the page, or the site removing the video, sends a
+       cancel beacon (`POST /video/<id>/cancel`): the job stops at once.
+     - A running job idle for `video.idle_seconds` gives its slot to a
+       queued job someone is actively waiting on. With nothing queued it
+       keeps working ahead. Resuming a stopped video offers "Try again".
+     - A job nobody has asked about for `video.abandon_seconds` (crashed
+       tab) is cancelled. Cancelled jobs' ffmpeg processes are killed and
+       their partial output deleted; each attempt writes its own file.
+   - Requests look like a browser's: `User-Agent` goes after `Host` (sent
+     through `-headers`, not `-user_agent`), and HLS sources are read
+     without `Range: bytes=0-` (`-seekable 0 -http_seekable 0`). Pornhub's
+     CDN answers 410 to either. Plain files keep Range, since an MP4 with
+     its index at the end needs to seek.
 5. **Fail closed**: if a job errors, the video stays covered and the
    control shows the error. Nothing plays uncensored.
 
@@ -79,9 +104,9 @@ proxy can't fetch). It stays covered and paused, and the control says the
 video can't be censored instead of offering "play censored". Nothing plays
 uncensored by default.
 
-The control's look (name, colours, icon) lives in one place so it can be
-branded later: CSS custom properties and text strings at the top of
-`inject.js`, with the product name from config.
+The control's look (name, colours, icons, strings) lives in one place: the
+`BRAND` block at the top of `inject.js`, with the product name from config
+(`video.brand_name`). It follows the brand in [`brand/`](brand/README.md).
 
 ## Costs and limits
 
@@ -92,6 +117,8 @@ branded later: CSS custom properties and text strings at the top of
 - **Image size**: ffmpeg adds about 100–150 MB to the Docker image.
 - **Seeking** past the part already processed waits for the job to reach
   it.
+- **Tokenised URLs**: sites that sign source URLs per page load (Pornhub)
+  get a new job, and no cache hit, each time the page is reloaded.
 - **Cookies**: the proxy fetches the source itself, so videos that need the
   site's login cookies may fail. Reddit's are public. The script can pass
   along non-HttpOnly cookies if needed.

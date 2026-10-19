@@ -59,12 +59,14 @@ class CensorConfig:
     fail_closed: bool
     timeout_seconds: float
     quality: int
+    avif_speed: int
 
 
 @dataclass(frozen=True)
 class ImagesConfig:
     size_floor_bytes: int
     min_side_px: int
+    strip_accept: frozenset[str]
     max_bytes: int
     max_decoded_bytes: int
     frame_step: int
@@ -96,10 +98,13 @@ class VideoConfig:
     ready_seconds: float
     max_duration_seconds: float
     max_concurrent_jobs: int
+    abandon_seconds: float
+    idle_seconds: float
     allow_private_sources: bool
     cache_dir: str
     cache_max_bytes: int
     brand_name: str
+    debug: bool
 
 
 @dataclass(frozen=True)
@@ -171,7 +176,8 @@ def _build(raw: dict[str, Any]) -> Config:
             male_context_exempts=bool(d["male_context_exempts"]),
         ),
         "censor": CensorConfig(**{**c, "fill_color": tuple(c["fill_color"])}),
-        "images": ImagesConfig(**raw["images"]),
+        "images": ImagesConfig(**{**raw["images"], "strip_accept": frozenset(
+            t.lower() for t in raw["images"]["strip_accept"] or ())}),
         "data_uris": DataUrisConfig(
             enabled=bool(raw["data_uris"]["enabled"]),
             content_types=frozenset(t.lower() for t in raw["data_uris"]["content_types"] or ()),
@@ -213,6 +219,8 @@ def _validate(cfg: Config) -> None:
                 raise ConfigError(f"{key}: bad regex {pattern!r}: {e}") from e
     if cfg.video.sample_fps <= 0:
         raise ConfigError("video.sample_fps must be > 0")
+    if cfg.video.abandon_seconds <= 0 or cfg.video.idle_seconds <= 0:
+        raise ConfigError("video.abandon_seconds and video.idle_seconds must be > 0")
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:

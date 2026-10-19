@@ -43,7 +43,13 @@ class DetectionLog:
                source: str = "response") -> None:
         if self.level == "off" or not _logger.handlers:
             return
-        notable = result.action in ("censored", "fail_closed", "error") or any(
+        # Images that couldn't be decoded passed through uncensored: worth
+        # seeing without debug logging (icons and SVG aside).
+        undecodable = (result.action == "skipped"
+                       and result.reason.startswith(("not a decodable image", "unsupported format"))
+                       and mime not in ("image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon")
+                       and result.format != "ICO")
+        notable = undecodable or result.action in ("censored", "fail_closed", "error") or any(
             d.detection.label in self._relevant for _, ds in result.frame_decisions for d in ds)
         if not notable and self.level != "debug":
             return

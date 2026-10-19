@@ -21,7 +21,7 @@ from PIL import Image, ImageOps, ImageSequence
 from .config import CensorConfig, Config
 from .detection import Box, Decision, Detector, decide
 
-SUPPORTED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
+SUPPORTED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "AVIF"}
 MIME_FORMATS = {
     "image/jpeg": "JPEG",
     "image/jpg": "JPEG",
@@ -29,6 +29,7 @@ MIME_FORMATS = {
     "image/png": "PNG",
     "image/webp": "WEBP",
     "image/gif": "GIF",
+    "image/avif": "AVIF",
 }
 
 
@@ -242,6 +243,11 @@ def _encode(d: _Decoded, cfg: CensorConfig) -> bytes:
         if len(images) > 1:
             opts.update(save_all=True, append_images=images[1:], duration=d.durations, loop=d.loop)
         first.save(buf, "WEBP", **opts)
+    elif d.format == "AVIF":
+        opts = {"quality": cfg.quality, "speed": cfg.avif_speed, **extra}
+        if len(images) > 1:
+            opts.update(save_all=True, append_images=images[1:], duration=d.durations, loop=d.loop)
+        first.save(buf, "AVIF", **opts)
     elif d.format == "GIF":
         opts = {}
         if len(images) > 1:

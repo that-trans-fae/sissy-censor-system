@@ -14,6 +14,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import re
 import socket
 import subprocess
 import tempfile
@@ -31,6 +32,8 @@ from .detection import Box, Detector, decide
 from .imaging import apply_censor
 
 log = logging.getLogger("censor_proxy.video")
+
+HLS = re.compile(r"\.m3u8$", re.IGNORECASE)
 
 
 class VideoError(RuntimeError):
@@ -60,6 +63,13 @@ class Job:
     seconds_done: float = 0.0
     frames_censored: int = 0
     created: float = field(default_factory=time.time)
+    # Last time a page asked about this job (status, stream, start), and
+    # last time it said the video was wanted now (playing or being prepared
+    # in a visible tab, not paused or in the background).
+    last_seen: float = field(default_factory=time.time)
+    last_active: float = field(default_factory=time.time)
+    # Set to stop the job (page closed, or preempted); the pump checks it.
+    cancel_reason: str = ""
     finished: float | None = None
     path: Path | None = None
     changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
@@ -75,6 +85,27 @@ class Job:
             "seconds_done": round(self.seconds_done, 1),
             "frames_censored": self.frames_censored,
         }
+
+    def touch(self, active: bool = False) -> None:
+        self.last_seen = time.time()
+        if active:
+            self.last_active = self.last_seen
+
+    def abandoned(self, after: float) -> bool:
+        return time.time() - self.last_seen > after
+
+    def idle(self, after: float) -> bool:
+        return time.time() - self.last_active > after
+
+    def cancel(self, reason: str) -> None:
+        if self.state in ("queued", "running") and not self.cancel_reason:
+            self.cancel_reason = reason
+            log.info("video %s: %s", self.id, reason)
+
+    def stop_reason(self, abandon_seconds: float) -> str:
+        if self.cancel_reason:
+            return self.cancel_reason
+        return "cancelled: nobody is watching" if self.abandoned(abandon_seconds) else ""
 
     def update(self, **fields) -> None:
         with self.changed:
@@ -100,6 +131,7 @@ class VideoJobs:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._slots = threading.Semaphore(vcfg.max_concurrent_jobs)
+        self._attempts = 0
 
     @property
     def detector(self) -> Detector:
@@ -123,16 +155,45 @@ class VideoJobs:
         id_ = job_id(src)
         with self._lock:
             job = self._jobs.get(id_)
-            if job and job.state != "error":
+            if job and job.state != "error" and not job.cancel_reason:
+                job.touch(active=True)
                 return job
-            job = Job(id_, src, referer, user_agent, path=self.dir / f"{id_}.mp4")
+            # Own file per attempt: a cancelled run may still be shutting down.
+            self._attempts += 1
+            job = Job(id_, src, referer, user_agent, path=self.dir / f"{id_}-{self._attempts}.mp4")
             self._jobs[id_] = job
         threading.Thread(target=self._run, args=(job,), name=f"video-{id_[:8]}", daemon=True).start()
         return job
 
+    def cancel(self, id_: str, reason: str) -> None:
+        job = self.get(id_)
+        if job:
+            job.cancel(reason)
+
+    def _wait_for_slot(self, job: Job) -> bool:
+        """Wait for a free slot, taking one from a running job whose video
+        is paused or in a background tab. False if this job was cancelled
+        or abandoned while it waited."""
+        v = self.cfg.video
+        while not self._slots.acquire(timeout=0.5):
+            if job.stop_reason(v.abandon_seconds):
+                return False
+            with self._lock:
+                idle = [j for j in self._jobs.values() if j.state == "running"
+                        and not j.cancel_reason and j.idle(v.idle_seconds)]
+            if idle and not job.idle(v.idle_seconds):  # only for a video someone is waiting on
+                min(idle, key=lambda j: j.last_active).cancel(
+                    "stopped: paused or in the background while another video waited")
+        return True
+
     def _run(self, job: Job) -> None:
-        with self._slots:
+        if not self._wait_for_slot(job):
+            self._fail(job, job.stop_reason(self.cfg.video.abandon_seconds))
+            return
+        try:
             try:
+                if reason := job.stop_reason(self.cfg.video.abandon_seconds):
+                    raise VideoError(reason)
                 self._evict()
                 job.update(state="running")
                 censor_video(job, self.cfg, self.detector)
@@ -140,8 +201,16 @@ class VideoJobs:
                 log.info("video done %s: %.0fs, %d frames censored", job.id, job.seconds_done,
                          job.frames_censored)
             except Exception as e:
-                log.warning("video failed %s: %s", job.id, e)
-                job.update(state="error", error=str(e) or type(e).__name__, finished=time.time())
+                self._fail(job, str(e) or type(e).__name__)
+        finally:
+            self._slots.release()
+
+    def _fail(self, job: Job, error: str) -> None:
+        log.warning("video failed %s: %s", job.id, error)
+        job.update(state="error", error=error, finished=time.time())
+        # Failed output is never served; a stream already open has what it got.
+        if job.path:
+            job.path.unlink(missing_ok=True)
 
     def _evict(self) -> None:
         """Delete the oldest finished outputs until the cache fits."""
@@ -178,11 +247,20 @@ def check_source(src: str, allow_private: bool = False) -> None:
 
 
 def _net_args(job: Job) -> list[str]:
-    args = []
+    # Some CDNs (Pornhub's, behind Cloudflare) answer 410 to requests that
+    # don't look like a browser's. User-Agent goes in -headers because
+    # -user_agent puts it before Host, which browsers never do.
+    headers = ""
     if job.user_agent:
-        args += ["-user_agent", job.user_agent]
+        headers += f"User-Agent: {job.user_agent}\r\n"
     if job.referer:
-        args += ["-headers", f"Referer: {job.referer}\r\n"]
+        headers += f"Referer: {job.referer}\r\n"
+    args = ["-headers", headers] if headers else []
+    if HLS.search(urlsplit(job.src).path):
+        # No open-ended "Range: bytes=0-" (the same CDNs refuse it); the
+        # demuxer's own option covers its playlist and segment requests.
+        # Playlists don't need seeking; files can (moov at the end).
+        args += ["-seekable", "0", "-http_seekable", "0"]
     return args
 
 
@@ -255,7 +333,14 @@ def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
         enc = subprocess.Popen(encode_cmd, stdin=subprocess.PIPE, stderr=enc_err)
         try:
             _pump(dec.stdout, enc.stdin, w, h, frame_bytes, fps, step, job, cfg, detector)
+        except BaseException:
+            # Cancelled or failed: the encoder would otherwise keep reading
+            # the audio input from the network before it noticed.
+            for proc in (dec, enc):
+                proc.kill()
+            raise
         finally:
+            dec.stdout.close()
             for proc in (dec, enc):
                 if proc.stdin:
                     try:
@@ -294,6 +379,8 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
         if len(buf) < frame_bytes:
             break
         frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3).copy()
+        if index % step == 0 and (reason := job.stop_reason(cfg.video.abandon_seconds)):
+            raise VideoError(reason)
         if index % step:
             pending.append(frame)
         else:

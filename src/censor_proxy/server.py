@@ -4,7 +4,8 @@ here). Serves /health, the injected script and the video job API.
   GET  /health
   GET  /inject.js
   POST /video/jobs            {"src": url, "page": url}  (text/plain, so no CORS preflight)
-  GET  /video/<id>/status
+  GET  /video/<id>/status?active=0|1  active=0: paused or in a background tab
+  POST /video/<id>/cancel     the page no longer wants it (closed, navigated)
   GET  /video/<id>/stream     fragmented MP4; streamed while the job runs,
                               Range-capable once it is done
 """
@@ -19,7 +20,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .config import Config
 from .video import Job, VideoError, VideoJobs
@@ -28,6 +29,7 @@ log = logging.getLogger("censor_proxy.server")
 
 STATIC = Path(__file__).with_name("static")
 JOB_PATH = re.compile(r"^/video/([0-9a-f]{24})/(status|stream)$")
+CANCEL_PATH = re.compile(r"^/video/([0-9a-f]{24})/cancel$")
 CHUNK = 256 * 1024
 
 
@@ -53,7 +55,9 @@ class InternalServer:
     def inject_js(self) -> bytes:
         js = (STATIC / "inject.js").read_text()
         values = {"__CENSOR_ORIGIN__": f"https://{self.cfg.proxy.health_host}",
-                  "__BRAND_NAME__": self.cfg.video.brand_name}
+                  "__BRAND_NAME__": self.cfg.video.brand_name,
+                  "__DEBUG__": "true" if self.cfg.video.debug else "false",
+                  "__MAX_HEIGHT__": str(self.cfg.video.max_height)}
         for key, value in values.items():
             js = js.replace(key, json.dumps(value)[1:-1])
         return js.encode()
@@ -110,16 +114,33 @@ class _Handler(BaseHTTPRequestHandler):
         if job is None:
             return self._json(404, {"error": "not found"})
         if m.group(2) == "status":
+            # Someone is still there; without active=0 they want it now.
+            query = parse_qs(urlsplit(self.path).query)
+            job.touch(active=query.get("active", ["1"])[0] != "0")
             return self._json(200, job.status(self.app.cfg.video.ready_seconds))
+        job.touch()
         self._stream(job)
 
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/video/jobs":
+        path = self.path.split("?", 1)[0]
+        if path == "/debug" and self.app.cfg.video.debug:
+            length = int(self.headers.get("Content-Length") or 0)
+            log.warning("inject.js: %s", self.rfile.read(min(length, 8192)).decode(errors="replace"))
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        cancel = CANCEL_PATH.match(path)
+        if path != "/video/jobs" and not cancel:
             return self._json(404, {"error": "not found"})
-        # Only pages on the video allowlist may start jobs.
+        # Only pages on the video allowlist may start or cancel jobs.
         origin = urlsplit(self.headers.get("Origin") or "").hostname or ""
         if not any(p.search(origin) for p in self.app.video_hosts):
             return self._json(403, {"error": "origin not allowed"})
+        if cancel:
+            self.app.jobs.cancel(cancel.group(1), "cancelled: the page closed or moved on")
+            return self._json(200, {"ok": True})
         try:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(min(length, 65536)) or b"{}")
@@ -153,6 +174,7 @@ class _Handler(BaseHTTPRequestHandler):
                         job.changed.wait(timeout=1.0)
                     finished = job.state in ("done", "error")
                 sent = self._send_new(job.path, sent)
+                job.touch()
                 if finished:
                     sent = self._send_new(job.path, sent)
                     break

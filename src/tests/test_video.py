@@ -3,7 +3,9 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 import urllib.request
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +13,8 @@ import pytest
 from conftest import FakeDetector, det
 
 from censor_proxy.server import InternalServer
-from censor_proxy.video import (Job, Probe, VideoError, VideoJobs, _pump, censor_video,
-                                check_source, output_size)
+from censor_proxy.video import (Job, Probe, VideoError, VideoJobs, _net_args, _pump,
+                                censor_video, check_source, output_size)
 
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 
@@ -21,6 +23,17 @@ def test_output_size_caps_height_and_keeps_even():
     assert output_size(Probe(0, 1920, 1080, 30, 10, None), 720) == (1280, 720)
     assert output_size(Probe(0, 801, 1423, 30, 10, None), 720) == (404, 720)
     assert output_size(Probe(0, 640, 360, 30, 10, None), 720) == (640, 360)
+
+
+def test_net_args_send_browser_like_requests():
+    # Pornhub's CDN answers 410 when User-Agent precedes Host (what
+    # -user_agent does) or when an HLS request carries "Range: bytes=0-".
+    job = Job("t", "https://cdn.example/v/master.m3u8?h=x", referer="https://site.example/p",
+              user_agent="UA/1")
+    assert _net_args(job) == ["-headers", "User-Agent: UA/1\r\nReferer: https://site.example/p\r\n",
+                              "-seekable", "0", "-http_seekable", "0"]
+    # Files stay seekable: an MP4 with its index at the end needs it.
+    assert _net_args(Job("t", "https://cdn.example/v.mp4?x.m3u8")) == []
 
 
 def run_pump(cfg, n, detections_per_call, step=4, w=64, h=48):
@@ -84,6 +97,24 @@ def test_censor_video_end_to_end(cfg, tmp_path):
     assert job.frames_censored == 20 and fake.calls == 10
 
 
+def test_pump_stops_when_nobody_is_watching(cfg):
+    w, h = 32, 32
+    src = io.BytesIO(bytes(4 * w * h * 3))
+    job = Job("t", "x", last_seen=time.time() - cfg.video.abandon_seconds - 1)
+    with pytest.raises(VideoError, match="cancelled"):
+        _pump(src, io.BytesIO(), w, h, w * h * 3, 10.0, 4, job, cfg, FakeDetector())
+
+
+def test_abandoned_queued_job_never_runs(cfg, tmp_path, monkeypatch):
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path)))
+    jobs = VideoJobs(cfg, FakeDetector())
+    monkeypatch.setattr("censor_proxy.video.censor_video",
+                        lambda *a: pytest.fail("abandoned job was run"))
+    job = Job("a" * 24, "https://example.com/v.mp4", last_seen=time.time() - 3600)
+    jobs._run(job)
+    assert job.state == "error" and "cancelled" in job.error
+
+
 @needs_ffmpeg
 def test_censor_video_rejects_unreadable_source(cfg, tmp_path):
     job = Job("t", str(tmp_path / "missing.mp4"), path=tmp_path / "out.mp4")
@@ -127,7 +158,7 @@ def test_server_health_and_inject_js(server):
     status, headers, body = get(base + "/inject.js")
     assert headers["Content-Type"].startswith("text/javascript")
     assert b'"https://censor.local"' in body and b"__CENSOR_ORIGIN__" not in body
-    assert b'"Censor"' in body
+    assert b'"Sissy Censor System"' in body
 
 
 def test_server_streams_running_job_then_serves_ranges(server, tmp_path):
@@ -165,3 +196,62 @@ def test_server_job_status_and_errors(server):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(base + "/video/" + "b" * 24 + "/status")
     assert e.value.code == 404
+
+
+def test_paused_job_yields_its_slot_to_a_waiting_one(cfg, tmp_path, monkeypatch):
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path), max_concurrent_jobs=1))
+    jobs = VideoJobs(cfg, FakeDetector())
+    # A running job whose video has been paused past idle_seconds holds the slot.
+    paused = Job("p" * 24, "https://example.com/a.mp4", state="running",
+                 last_active=time.time() - cfg.video.idle_seconds - 1)
+    jobs._jobs[paused.id] = paused
+    jobs._slots.acquire()
+    ran = threading.Event()
+    monkeypatch.setattr("censor_proxy.video.censor_video", lambda *a: ran.set())
+    waiting = Job("w" * 24, "https://example.com/b.mp4")
+    jobs._jobs[waiting.id] = waiting
+    worker = threading.Thread(target=jobs._run, args=(waiting,))
+    worker.start()
+    deadline = time.time() + 5
+    while not paused.cancel_reason and time.time() < deadline:
+        waiting.touch(active=True)  # its page is polling, visible
+        time.sleep(0.1)
+    assert "paused" in paused.cancel_reason
+    jobs._slots.release()  # the paused job's pump stops and frees the slot
+    worker.join(5)
+    assert ran.is_set() and waiting.state == "done"
+
+
+def test_waiting_job_in_background_does_not_preempt(cfg, tmp_path):
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path), max_concurrent_jobs=1))
+    jobs = VideoJobs(cfg, FakeDetector())
+    paused = Job("p" * 24, "https://example.com/a.mp4", state="running", last_active=0)
+    jobs._jobs[paused.id] = paused
+    jobs._slots.acquire()
+    hidden = Job("h" * 24, "https://example.com/b.mp4", last_active=0)
+    worker = threading.Thread(target=jobs._wait_for_slot, args=(hidden,))
+    worker.start()
+    time.sleep(1.2)
+    hidden.cancel("test over")
+    worker.join(5)
+    assert not paused.cancel_reason
+
+
+def test_server_status_activity_and_cancel(server):
+    srv, jobs, base = server
+    job = Job("c" * 24, "https://example.com/v.mp4", state="running", last_active=0)
+    jobs._jobs[job.id] = job
+    get(f"{base}/video/{job.id}/status?active=0")
+    assert job.last_active == 0 and time.time() - job.last_seen < 5
+    get(f"{base}/video/{job.id}/status?active=1")
+    assert time.time() - job.last_active < 5
+
+    def cancel(origin):
+        req = urllib.request.Request(f"{base}/video/{job.id}/cancel", data=b"", method="POST",
+                                     headers={"Origin": origin})
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as e:
+            return e.code
+    assert cancel("https://evil.example") == 403 and not job.cancel_reason
+    assert cancel("https://www.reddit.com") == 200 and "closed" in job.cancel_reason

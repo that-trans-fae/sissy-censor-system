@@ -26,7 +26,8 @@ def decode(data):
 BOX = (40, 40, 60, 60)
 
 
-@pytest.mark.parametrize("fmt,kw", [("PNG", {}), ("WEBP", {"lossless": True}), ("GIF", {})])
+@pytest.mark.parametrize("fmt,kw", [("PNG", {}), ("WEBP", {"lossless": True}), ("GIF", {}),
+                                    ("AVIF", {"quality": 100})])
 def test_only_the_box_changes(cfg, fmt, kw):
     original = encode(noise(), fmt, **kw)
     result = Censor(cfg, FakeDetector([det("FEMALE_BREAST_EXPOSED", box=BOX)])).censor_bytes(original)
@@ -36,7 +37,10 @@ def test_only_the_box_changes(cfg, fmt, kw):
     # Padded box is 34..106 on both axes; outside a margin past that, untouched.
     diff = np.abs(before - after).sum(axis=2) > 0
     assert diff[50:90, 50:90].mean() > 0.9
-    if fmt != "GIF":  # GIF re-quantizes the whole palette
+    if fmt == "AVIF":  # lossy everywhere: compare change, not exact pixels
+        changed = np.abs(before - after).sum(axis=2)
+        assert changed[50:90, 50:90].mean() > 5 * changed[:, 120:].mean()
+    elif fmt != "GIF":  # GIF re-quantizes the whole palette
         assert not diff[:, 110:].any() and not diff[110:, :].any()
 
 

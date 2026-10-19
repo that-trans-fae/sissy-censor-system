@@ -36,6 +36,7 @@ def site(tmp_path):
     Image.fromarray(rng.integers(0, 256, (1500, 1400, 3), dtype=np.uint8)).save(root / "big.png")
     (root / "page.html").write_text("<!doctype html><html><head><title>t</title></head><body></body></html>")
     (root / "blob.bin").write_bytes(b"\0" * 1024)
+    (root / "clip.mp4").write_bytes(b"\0\0\0\x18ftypmp42" + b"\0" * 200_000)
     handler = lambda *a, **k: SimpleHTTPRequestHandler(*a, directory=str(root), **k)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -93,3 +94,28 @@ def test_html_page_gets_script_and_other_bodies_pass(site, proxy):
     req = urllib.request.Request(base + "/page.html", headers={"Sec-Fetch-Dest": "document"})
     assert b'src="https://censor.local/inject.js"' in opener.open(req, timeout=30).read()
     assert opener.open(base + "/blob.bin", timeout=30).read() == b"\0" * 1024
+
+
+def test_video_opened_directly_becomes_control_page(site, proxy):
+    root, base = site
+    opener, _ = proxy
+    req = urllib.request.Request(base + "/clip.mp4", headers={"Sec-Fetch-Dest": "document"})
+    with opener.open(req, timeout=30) as r:
+        body = r.read()
+        assert r.headers["Content-Type"].startswith("text/html")
+    assert b'src="https://censor.local/inject.js"' in body
+    assert f'<video src="{base}/clip.mp4" preload="none"'.encode() in body
+    # The same URL loaded by a <video> element passes through untouched.
+    req = urllib.request.Request(base + "/clip.mp4", headers={"Sec-Fetch-Dest": "video"})
+    assert opener.open(req, timeout=30).read() == (root / "clip.mp4").read_bytes()
+
+
+def test_strip_accept():
+    import sys
+    sys.path.insert(0, str(SRC))
+    from censor import strip_accept
+    chrome = "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    assert strip_accept(chrome, frozenset({"image/jxl"})) == \
+        "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    assert strip_accept("image/jxl", frozenset({"image/jxl"})) == "*/*"
+    assert strip_accept("text/html", frozenset({"image/jxl"})) == "text/html"

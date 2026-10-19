@@ -22,12 +22,16 @@ Last updated Oct 18, 2026.
   slashes) are censored in place through the same `censor_bytes()`
 - Recall tuning: tiling of tall/wide images and lower thresholds (false
   positives preferred to misses)
+- Branding: mark, palette and README banners in `docs/brand/`; the video
+  overlay restyled to match (checked in a browser on a static test page)
 
 ## Not done yet
 
 - **Video**: built and tested end to end with curl (injection, CSP, jobs,
-  live fMP4 streaming, Range), injected on every site; still to verify in
-  Chromium, and HLS/DASH against a real site
+  live fMP4 streaming, Range), injected on every site. HLS plays in
+  Chromium on Pornhub (manifest from inline page config, browser-like
+  ffmpeg requests); cancelling closed, paused and abandoned jobs is verified with curl only.
+  DASH still untested against a real site
 - **System-wide proxy**: GNOME proxy setting with `src/proxy.pac`, and a check
   that browsing falls back to direct when the container is down. Chromium may
   not accept a `file://` PAC URL from system settings; if not, serve it over
