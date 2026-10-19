@@ -97,19 +97,49 @@ brew_bin() {
   fi
 }
 
-# Installs a cask, updating Homebrew first (once): an old Homebrew can't read
-# the current cask definitions ("Unexpected method ... called on Cask") and
-# exits non-zero even when the app got installed, so callers check for the
-# app rather than trusting the exit status.
+# Runs a brew cask command (install, reinstall), updating Homebrew first
+# (once). An old Homebrew can't read the current cask definitions
+# ("Unexpected method ... called on Cask") and exits non-zero even when the
+# app got installed, so callers check the app rather than the exit status.
+# It also doesn't know newer macOS releases, under which casks list their
+# Intel downloads, and so installs the Apple silicon build on an Intel Mac.
 BREW_UPDATED=0
-brew_cask_install() {
+brew_cask() {
   local brew; brew=$(brew_bin)
   if [ "$BREW_UPDATED" -eq 0 ]; then
     log "Updating Homebrew"
-    "$brew" update || warn "Homebrew did not update; installing with the version you have"
+    "$brew" update || warn "Homebrew did not update; using the version you have"
     BREW_UPDATED=1
   fi
-  "$brew" install --cask "$@"
+  "$brew" "$1" --cask "${@:2}"
+}
+
+# True when an app's executable can run on this Mac. Apple silicon runs
+# either build (Intel ones through Rosetta); an Intel Mac needs x86_64.
+# hw.optional.arm64 is 1 on Apple silicon even in a Rosetta shell, where
+# uname -m says x86_64.
+app_runs_here() {
+  [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && return 0
+  local exe
+  exe=$(defaults read "$1/Contents/Info" CFBundleExecutable 2>/dev/null) || return 0
+  file -b "$1/Contents/MacOS/$exe" | grep -q x86_64
+}
+
+# Installs a cask's app, or reinstalls it when the installed one is the
+# wrong build for this Mac.
+install_cask_app() {
+  local cask=$1 app=$2 name=$3
+  if [ ! -d "$app" ]; then
+    log "Installing $name"
+    brew_cask install "$cask" || true
+  elif ! app_runs_here "$app"; then
+    log "$name is the Apple silicon build; reinstalling the Intel one"
+    brew_cask reinstall "$cask" || true
+  else
+    return 0
+  fi
+  [ -d "$app" ] || die "$name did not install; see Homebrew's output above"
+  app_runs_here "$app" || die "Homebrew installed the Apple silicon build of $name on this Intel Mac; update Homebrew ('brew update', or reinstall it from https://brew.sh) and run this again"
 }
 
 # ------------------------------------------------------------------ docker
@@ -154,13 +184,7 @@ install_docker_desktop_macos() {
     log "Installing Homebrew"
     NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   fi
-  if [ -d /Applications/Docker.app ]; then
-    log "Docker Desktop is already installed"
-  else
-    log "Installing Docker Desktop"
-    brew_cask_install docker-desktop || true
-    [ -d /Applications/Docker.app ] || die "Docker Desktop did not install; see Homebrew's output above"
-  fi
+  install_cask_app docker-desktop /Applications/Docker.app "Docker Desktop"
   setup_docker_desktop_macos
 }
 
@@ -401,16 +425,12 @@ uninstall_updater() {
 CHROMIUM=
 install_chromium() {
   if [ "$OS" = Darwin ]; then
-    if [ ! -d /Applications/Chromium.app ]; then
-      # Homebrew disabled its chromium cask (Sep 2026, fails Gatekeeper).
-      # ungoogled-chromium installs the same Chromium.app, with H.264 for
-      # the video control. It isn't notarized, so the quarantine flag comes
-      # off (current Homebrew dropped --no-quarantine).
-      log "Installing Chromium (ungoogled-chromium)"
-      brew_cask_install ungoogled-chromium || true
-      [ -d /Applications/Chromium.app ] || die "Chromium did not install; see Homebrew's output above"
-      xattr -dr com.apple.quarantine /Applications/Chromium.app 2>/dev/null || true
-    fi
+    # Homebrew disabled its chromium cask (Sep 2026, fails Gatekeeper).
+    # ungoogled-chromium installs the same Chromium.app, with H.264 for
+    # the video control. It isn't notarized, so the quarantine flag comes
+    # off (current Homebrew dropped --no-quarantine).
+    install_cask_app ungoogled-chromium /Applications/Chromium.app Chromium
+    xattr -dr com.apple.quarantine /Applications/Chromium.app 2>/dev/null || true
     CHROMIUM=/Applications/Chromium.app/Contents/MacOS/Chromium
     return
   fi
