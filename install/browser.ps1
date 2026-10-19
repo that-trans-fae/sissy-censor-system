@@ -61,6 +61,14 @@ function Log($msg)  { Write-Host "==> $msg" -ForegroundColor Magenta }
 function Warn($msg) { Write-Host "warning: $msg" -ForegroundColor Yellow }
 function Die($msg)  { throw $msg }   # reported by the catch around main
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+# Runs a native command with all its output discarded; check $LASTEXITCODE.
+# Under $ErrorActionPreference Stop, Windows PowerShell turns every stderr
+# line of a redirected native command into a terminating error (docker
+# compose prints its progress there), so the preference is relaxed here.
+function Quiet([scriptblock]$cmd) {
+    $ErrorActionPreference = 'Continue'
+    & $cmd *> $null
+}
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -79,7 +87,7 @@ function Winget-Install($id) {
 function Install-DockerDesktop {
     if (Test-Path $DockerDesktopExe) { Log 'Docker Desktop is already installed'; return }
     Log 'Checking the Windows Subsystem for Linux'
-    wsl --status *> $null
+    Quiet { wsl --status }
     if ($LASTEXITCODE -ne 0) {
         Die 'WSL 2 is not enabled. From an elevated PowerShell run "wsl --install --no-distribution", reboot, then rerun this installer'
     }
@@ -95,7 +103,7 @@ function Start-DockerDesktop {
     Refresh-Path
     $waited = 0
     while ($true) {
-        docker info *> $null
+        Quiet { docker info }
         if ($LASTEXITCODE -eq 0) { break }
         if ($waited -eq 0) {
             Write-Host '    Waiting for Docker Desktop. On first start, accept the service agreement'
@@ -178,7 +186,7 @@ function Set-Gpu {
         Log 'Looking for a GPU for video'
         Push-Location $ScsDir
         try {
-            docker compose -f compose.yaml -f compose.nvidia.yaml run --rm --no-deps -T censor-proxy python -m censor_proxy.hwaccel *> $null
+            Quiet { docker compose -f compose.yaml -f compose.nvidia.yaml run --rm --no-deps -T censor-proxy python -m censor_proxy.hwaccel }
             if ($LASTEXITCODE -eq 0) { $files = 'compose.yaml;compose.nvidia.yaml' }
         } finally { Pop-Location }
     }
@@ -198,7 +206,7 @@ function Start-Proxy {
     } finally { Pop-Location }
     # The release a reinstall replaced.
     if ($script:OldImage -and $script:OldImage -ne $script:NewImage) {
-        docker image rm (($script:OldImage -split '@sha256:')[0] + ':sha256-' + ($script:OldImage -split '@sha256:')[1]) *> $null
+        Quiet { docker image rm (($script:OldImage -split '@sha256:')[0] + ':sha256-' + ($script:OldImage -split '@sha256:')[1]) }
     }
     $waited = 0
     while (-not ((Test-Path $CaPem) -and (Get-Item $CaPem).Length -gt 0)) {
