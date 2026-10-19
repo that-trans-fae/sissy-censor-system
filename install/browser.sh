@@ -1,37 +1,43 @@
 #!/usr/bin/env bash
 # Sissy Censor System: dedicated browser installer for Linux and macOS.
 #
-# Installs Docker (Docker Engine on Linux, Docker Desktop on macOS), clones
-# the repository, builds and starts the proxy, installs Chromium and adds a "Sissy Browser" launcher: a separate
-# Chromium profile that always goes through the proxy and trusts its CA in
-# the profile's own certificate store. Nothing system-wide changes: no
-# system proxy, no CA in the system store, and your usual browsers are
-# untouched. Windows: install/browser.ps1.
+# Installs Docker (Docker Engine on Linux, Docker Desktop on macOS), pulls
+# the proxy image from Docker Hub and starts it from ~/scs, adds an hourly
+# job that keeps it updated (scs-update, from the image), installs Chromium
+# and adds a "Sissy Browser" launcher: a separate Chromium profile that
+# always goes through the proxy and trusts its CA in the profile's own
+# certificate store. Nothing system-wide changes: no system proxy, no CA in
+# the system store, and your usual browsers are untouched. Windows:
+# install/browser.ps1.
 #
 # Run as your normal user (not root); sudo is asked for where it is needed:
 #
 #   curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | bash
 #
-# Remove the launcher and its profile (keeps Docker, Chromium and the checkout):
+# Remove the launcher, its profile and the update job (keeps Docker,
+# Chromium and ~/scs):
 #
 #   curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | SCS_UNINSTALL=1 bash
 #
-# Environment overrides: SCS_REPO_URL, SCS_DIR, SCS_BRANCH.
+# Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR.
 set -euo pipefail
 
 # ---------------------------------------------------------------- settings
-# TODO: replace the placeholder with the real repository URL.
-SCS_REPO_URL="${SCS_REPO_URL:-https://github.com/OWNER/scs.git}"
+# TODO: replace the placeholder with the Docker Hub repository.
+SCS_IMAGE_REPO="${SCS_IMAGE_REPO:-OWNER/scs}"
+# The tag installs follow; scs-update moves to whatever it points at.
+SCS_CHANNEL="${SCS_CHANNEL:-$SCS_IMAGE_REPO:latest}"
 SCS_DIR="${SCS_DIR:-$HOME/scs}"
-SCS_BRANCH="${SCS_BRANCH:-main}"
 SCS_UNINSTALL="${SCS_UNINSTALL:-0}"
 
 BROWSER_NAME="Sissy Browser"
 BROWSER_ID=sissy-browser
 PROXY_HOST=127.0.0.1
 PROXY_PORT=8080
-CA_PEM="$SCS_DIR/src/mitmproxy/mitmproxy-ca-cert.pem"
-ICON_SVG="$SCS_DIR/docs/brand/browser-icon.svg"
+CA_PEM="$SCS_DIR/mitmproxy/mitmproxy-ca-cert.pem"
+ICON_SVG="$SCS_DIR/browser-icon.svg"
+UPDATE_UNIT=scs-update
+UPDATE_AGENT=local.scs.update
 ADMIN_URL="http://localhost:8082/admin"
 ADMIN_BOOKMARK="SCS admin panel"
 OS=$(uname -s)
@@ -152,34 +158,63 @@ start_docker() {
   done
 }
 
-# ---------------------------------------------------------------- the repo
-clone_repo() {
-  if ! have git; then
-    if [ "$OS" = Linux ]; then pkg_install git
-    else
-      log "Installing the Xcode command line tools for git"
-      xcode-select --install 2>/dev/null || true
-      until have git; do sleep 5; done
+# --------------------------------------------------------------- the proxy
+# KEY=value in ~/scs/.env, which compose reads; other keys are kept.
+env_set() {
+  local file="$SCS_DIR/.env"
+  [ -f "$file" ] || printf '# Compose settings for this install (written by the installer and scs-update).\n' >"$file"
+  awk -v k="$1" -v v="$2" '
+    index($0, k "=") == 1 { if (!done) print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }' "$file" >"$file.tmp" && mv -f "$file.tmp" "$file"
+}
+
+# Earlier installers cloned the repository and built the image in
+# $SCS_DIR/src. Stop that container and keep its CA (which the profile
+# already trusts) and settings.
+migrate_checkout() {
+  [ -f "$SCS_DIR/src/compose.yaml" ] || return 0
+  log "Moving the CA and settings out of the old checkout layout"
+  (cd "$SCS_DIR/src" && "${DOCKER[@]}" compose down) || true
+  local d
+  for d in mitmproxy config; do
+    if [ -d "$SCS_DIR/src/$d" ] && [ -z "$(ls -A "$SCS_DIR/$d" 2>/dev/null)" ]; then
+      mkdir -p "$SCS_DIR/$d"
+      cp -Rp "$SCS_DIR/src/$d/." "$SCS_DIR/$d/"
     fi
-  fi
-  if [ -d "$SCS_DIR/.git" ]; then
-    log "Updating $SCS_DIR"
-    git -C "$SCS_DIR" pull --ff-only || warn "could not fast-forward $SCS_DIR; continuing with what is there"
-  else
-    log "Cloning $SCS_REPO_URL into $SCS_DIR"
-    case "$SCS_REPO_URL" in *OWNER/*) die "SCS_REPO_URL is still the placeholder; set it to the real repository URL" ;; esac
-    git clone --branch "$SCS_BRANCH" "$SCS_REPO_URL" "$SCS_DIR"
-  fi
+  done
+}
+
+get_proxy() {
+  case "$SCS_CHANNEL" in OWNER/*) die "SCS_IMAGE_REPO is still the placeholder; set it to the Docker Hub repository" ;; esac
+  log "Downloading $SCS_CHANNEL (over a gigabyte the first time)"
+  "${DOCKER[@]}" pull "$SCS_CHANNEL"
+  local repo=${SCS_CHANNEL%:*} image
+  image=$("${DOCKER[@]}" image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$SCS_CHANNEL" \
+          | awk -v p="$repo@sha256:" 'index($0, p) == 1 { print; exit }')
+  [ -n "$image" ] || die "pulled $SCS_CHANNEL but found no digest for it"
+  migrate_checkout
+  # The container runs unprivileged and writes to these mounts; Docker Engine
+  # would create missing ones as root, where it can't.
+  mkdir -p "$SCS_DIR/mitmproxy" "$SCS_DIR/config" "$SCS_DIR/logs"
+  # compose.yaml, the updater and the icon come out of the image, through
+  # tar on stdout so the files are ours even while Docker needs sudo.
+  "${DOCKER[@]}" run --rm --network none --entrypoint tar "$image" -C /app/dist -cf - . | tar -xf - -C "$SCS_DIR"
+  chmod +x "$SCS_DIR/scs-update"
+  env_set SCS_CHANNEL "$SCS_CHANNEL"
+  env_set SCS_IMAGE "$image"
+  # Run the container as this user (user: in compose.yaml).
+  env_set SCS_UID "$(id -u)"
+  env_set SCS_GID "$(id -g)"
 }
 
 start_proxy() {
-  log "Building and starting the proxy (the first build downloads a few hundred MB)"
-  # The container runs unprivileged and writes to these mounts; Docker Engine
-  # would create missing ones as root, where it can't.
-  mkdir -p "$SCS_DIR/src/mitmproxy" "$SCS_DIR/src/config" "$SCS_DIR/src/logs"
-  # Run the container as this user (user: in src/compose.yaml reads .env).
-  printf 'SCS_UID=%s\nSCS_GID=%s\n' "$(id -u)" "$(id -g)" >"$SCS_DIR/src/.env"
-  (cd "$SCS_DIR/src" && "${DOCKER[@]}" compose up -d --build)
+  local other
+  other=$("${DOCKER[@]}" ps --filter "publish=$PROXY_PORT" --format '{{.Names}} {{.Label "com.docker.compose.project"}}' \
+          | awk '$2 != "scs" { print $1; exit }')
+  [ -z "$other" ] || die "another container ($other) holds port $PROXY_PORT; stop it (docker stop $other) and rerun"
+  log "Starting the proxy"
+  (cd "$SCS_DIR" && "${DOCKER[@]}" compose up -d)
   local waited=0
   until [ -s "$CA_PEM" ]; do
     [ "$waited" -lt 120 ] || die "the proxy did not write its CA to $CA_PEM"
@@ -189,11 +224,78 @@ start_proxy() {
   waited=0
   until curl -fsS -x "http://$PROXY_HOST:$PROXY_PORT" http://censor.local/health >/dev/null 2>&1; do
     if [ "$waited" -ge 60 ]; then
-      warn "health check through the proxy failed; check 'docker compose logs' in $SCS_DIR/src"
+      warn "health check through the proxy failed; check 'docker compose logs' in $SCS_DIR"
       break
     fi
     sleep 3; waited=$((waited + 3))
   done
+}
+
+# The hourly scs-update run: a systemd user timer on Linux (it runs while
+# you are logged in), a launchd agent on macOS.
+install_updater() {
+  log "Adding the hourly update check"
+  if [ "$OS" = Linux ]; then
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+      warn "no systemd user session, so updates won't run on their own; run $SCS_DIR/scs-update now and then"
+      return
+    fi
+    local units="$HOME/.config/systemd/user"
+    mkdir -p "$units"
+    cat >"$units/$UPDATE_UNIT.service" <<UNIT
+[Unit]
+Description=Sissy Censor System update check
+
+[Service]
+Type=oneshot
+ExecStart="$SCS_DIR/scs-update"
+UNIT
+    cat >"$units/$UPDATE_UNIT.timer" <<UNIT
+[Unit]
+Description=Hourly Sissy Censor System update check
+
+[Timer]
+OnStartupSec=10min
+OnUnitActiveSec=1h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+UNIT
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$UPDATE_UNIT.timer" >/dev/null 2>&1
+    return
+  fi
+  local plist="$HOME/Library/LaunchAgents/$UPDATE_AGENT.plist"
+  mkdir -p "$(dirname "$plist")"
+  cat >"$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$UPDATE_AGENT</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$SCS_DIR/scs-update</string></array>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
+</dict>
+</plist>
+PLIST
+  launchctl bootout "gui/$(id -u)/$UPDATE_AGENT" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+}
+
+uninstall_updater() {
+  log "Removing the update check"
+  if [ "$OS" = Linux ]; then
+    systemctl --user disable --now "$UPDATE_UNIT.timer" >/dev/null 2>&1 || true
+    rm -f "$HOME/.config/systemd/user/$UPDATE_UNIT.service" "$HOME/.config/systemd/user/$UPDATE_UNIT.timer"
+    systemctl --user daemon-reload 2>/dev/null || true
+  else
+    launchctl bootout "gui/$(id -u)/$UPDATE_AGENT" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/$UPDATE_AGENT.plist"
+  fi
 }
 
 # ---------------------------------------------------------------- chromium
@@ -243,7 +345,7 @@ profile_dir() {
 # profile's own certificate store (the "Installed by you" list in
 # chrome://certificate-manager, a SQLite file Chromium creates on first
 # start), so no command-line flag and no system-wide trust is needed, and a
-# regenerated CA (after deleting src/mitmproxy/) needs no reinstall.
+# regenerated CA (after deleting ~/scs/mitmproxy/) needs no reinstall.
 LAUNCHER=
 write_launcher() {
   local path=$1
@@ -254,13 +356,13 @@ write_launcher() {
 SCS_DIR="$SCS_DIR"
 PROFILE="$(profile_dir)"
 CHROMIUM="$CHROMIUM"
-CA="\$SCS_DIR/src/mitmproxy/mitmproxy-ca-cert.pem"
+CA="\$SCS_DIR/mitmproxy/mitmproxy-ca-cert.pem"
 DB="\$PROFILE/Default/ServerCertificate"
 
 # Start the proxy if Docker is up and it is not running yet.
 $( [ "$OS" = Linux ] && echo 'export DOCKER_HOST=unix:///var/run/docker.sock' )
 if command -v timeout >/dev/null 2>&1; then t="timeout 30"; else t=""; fi
-(cd "\$SCS_DIR/src" && \$t docker compose up -d >/dev/null 2>&1) || true
+(cd "\$SCS_DIR" && \$t docker compose up -d >/dev/null 2>&1) || true
 
 # Trust the proxy CA in this profile's certificate store. Chromium creates
 # the store on first start, so a new profile is initialised headless first.
@@ -468,20 +570,24 @@ uninstall_launcher() {
 # -------------------------------------------------------------------- main
 if [ "$SCS_UNINSTALL" = 1 ]; then
   uninstall_launcher
+  uninstall_updater
   log "Done. Docker, Chromium and $SCS_DIR were left in place; stop the proxy with"
-  echo "    (cd $SCS_DIR/src && docker compose down)"
+  echo "    (cd $SCS_DIR && docker compose down)"
   exit 0
 fi
 
 if [ "$OS" = Linux ]; then install_docker_linux; else install_docker_desktop_macos; fi
 start_docker
-clone_repo
+get_proxy
 start_proxy
 install_chromium
-[ -f "$ICON_SVG" ] || die "icon missing from the checkout: $ICON_SVG"
+[ -f "$ICON_SVG" ] || die "icon missing from the image: $ICON_SVG"
 if [ "$OS" = Linux ]; then install_launcher_linux; else install_launcher_macos; fi
 seed_profile
 init_profile
+# scs-update applies an update only while no browser runs on this profile.
+env_set SCS_PROFILE "\"$(profile_dir)\""
+install_updater
 
 log "Installed"
 cat <<EOF
@@ -489,7 +595,7 @@ cat <<EOF
     Profile:      $(profile_dir) (bookmark bar: $ADMIN_BOOKMARK)
     Proxy:        $PROXY_HOST:$PROXY_PORT (Docker, restarts with the machine)
     Admin panel:  http://localhost:8082/admin
-    Checkout:     $SCS_DIR
+    Install:      $SCS_DIR (updates itself hourly from $SCS_CHANNEL; $SCS_DIR/scs-update --now checks at once)
     Only $BROWSER_NAME goes through the proxy; your other browsers are unchanged.
 EOF
 [ "$GROUP_ADDED" = 0 ] || echo "    Log out and back in so you can run docker without sudo."

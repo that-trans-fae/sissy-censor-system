@@ -31,9 +31,12 @@ src/censor_proxy/static/admin.*    the admin panel page
 src/censor_proxy/config.py     dataclasses + loader (defaults.yaml merged with user file)
 src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
+src/censor_proxy/updates.py    container side of auto-update: policy and health commands, status for the panel
+src/dist/                      copied out of the image onto users' machines: compose.yaml, scs-update(.ps1)
 src/config/config.yaml         user overrides, mounted at /config
 src/tools/draw_boxes.py        box-draw review of the samples
 src/tools/dump_video_scores.py, replay_attribution.py  video attribution tuning
+src/tools/release.sh           build amd64+arm64 and push to Docker Hub as VERSION and latest
 src/tests/                     pytest; fixtures/expected-<model>.json
 docs/brand/                    mark, README banners, palette, browser icon
 install/                       one-line dedicated browser installers (browser.sh, browser.ps1)
@@ -46,7 +49,7 @@ Everything runs in the Docker image; the host Python is not used. Run from
 `src/`:
 
 ```bash
-docker build -t censor-proxy .
+docker build --build-context brand=../docs/brand -t censor-proxy .
 ```
 
 ```bash
@@ -116,6 +119,32 @@ card until it loads. It is injected while either feature is on, and gates
 its video hooks on `video.enabled`. The pieces are filled into the script by
 `InternalServer.inject_js()` (`__NAME__` markers).
 
+## Releases and updates
+
+Users get the image from Docker Hub, never the source: the installers pull
+`SCS_CHANNEL` (`OWNER/scs:latest`), copy `/app/dist` out of it into `~/scs`
+and run it from there with `.env` pinning `SCS_IMAGE` to a digest.
+`tools/release.sh VERSION` publishes; pushing `latest` is releasing. An
+hourly host job (systemd user timer, launchd agent or scheduled task) runs
+`scs-update`, which pulls the channel at most every `updates.check_hours`,
+recreates the container on a new digest while the Sissy Browser is closed,
+waits for the image's `HEALTHCHECK`, and otherwise restores the old
+compose.yaml and digest and skips that release. It writes
+`logs/update.json`, which the panel's Overview shows. The container never
+contacts Docker Hub and has no Docker socket. See `docs/decisions.md`.
+
+Upgrades must keep old installs working:
+
+- A renamed or removed config key gets an entry in `config.MIGRATIONS`, or
+  an existing `config.yaml` stops the new release from starting (it is then
+  rolled back and skipped).
+- `dist/compose.yaml` is replaced at each update, but `.env` is not: a new
+  variable needs a `${VAR:-default}`. Keep it in step with `compose.yaml`
+  (`tests/test_dist.py`).
+- `scs-update` runs on macOS's bash 3.2 and on the host, so it never
+  evaluates anything from the container or the folders it can write
+  (`config/`, `logs/`, `mitmproxy/`).
+
 ## Admin panel
 
 `admin.py` runs its own listener on `admin.port` (8082). Compose publishes
@@ -173,6 +202,9 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
   script gets the browser grouped with Chromium in the dock, so for snap
   the installer's entry calls Chromium directly.
 - `src/mitmproxy/` holds the CA private key: never commit or share it.
+- Docker Desktop's file sharing keeps showing the container a file's old
+  contents after the host renames a new file over it, so `scs-update`
+  writes `logs/update.json` by delete and exclusive create instead.
 - `docker ps` truncates commands, so grepping its output for a script name
   silently matches nothing; use `--no-trunc` (or `--filter`) before killing
   a background container.

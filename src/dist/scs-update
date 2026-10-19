@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+# Sissy Censor System updater for Linux and macOS (Windows: scs-update.ps1).
+#
+# Lives in the install folder (~/scs) and runs hourly from the systemd user
+# timer or launchd agent the installer adds. Each run:
+#
+#   1. reads updates.* from config/config.yaml, through the container
+#      (censor_proxy/updates.py); updates.enabled false stops here
+#   2. at most every updates.check_hours, pulls SCS_CHANNEL from .env
+#      (the Docker Hub tag followed, such as OWNER/scs:latest)
+#   3. if that is a new image, and the Sissy Browser is closed (or
+#      updates.wait_for_browser is false), puts the image's compose.yaml in
+#      place, pins SCS_IMAGE in .env to the new digest and recreates the
+#      container
+#   4. keeps it once the container reports healthy; otherwise puts the old
+#      compose.yaml and image back and skips that release from then on
+#
+# The result goes to logs/update.json, which the admin panel shows, and a
+# history to update.log. Everything the container can write (config/,
+# logs/, mitmproxy/) is treated as untrusted: nothing read from there or
+# from the container is evaluated, and nothing in logs/ is written through.
+#
+#   ./scs-update          what the timer runs
+#   ./scs-update --now    check now and apply at once, even with updates off
+#                         or the browser open
+set -uo pipefail
+
+DIR=$(cd "$(dirname "$0")" && pwd -P) || exit 1
+cd "$DIR" || exit 1
+
+FORCE=0
+case "${1:-}" in
+  --now) FORCE=1 ;;
+  "") ;;
+  *) echo "usage: $0 [--now]" >&2; exit 2 ;;
+esac
+
+# The installer sets up Docker Engine on Linux and talks to it on its
+# socket, leaving any Docker Desktop context alone; so does this, unless
+# DOCKER_HOST says otherwise. launchd and systemd start with a bare PATH.
+if [ "$(uname -s)" = Linux ]; then export DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}"; fi
+PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:$HOME/.docker/bin"
+
+SERVICE=censor-proxy
+STATE=.update-state
+# Longest wait for a new container to report healthy (its HEALTHCHECK
+# start period is 180 s).
+HEALTH_TIMEOUT=300
+
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>update.log
+  [ ! -t 1 ] || printf '%s\n' "$*"
+}
+
+# KEY=value files (.env, .update-state): read and replace one key without
+# evaluating anything. Values may be double-quoted, as compose allows.
+kv_get() {
+  [ -f "$1" ] || return 0
+  sed -n "s/^$2=//p" "$1" | tail -n 1 | sed 's/^"\(.*\)"$/\1/'
+}
+kv_set() {
+  local tmp
+  tmp=$(mktemp "$DIR/.kv.XXXXXX") || return 1
+  [ -f "$1" ] || : >"$1"
+  awk -v k="$2" -v v="$3" '
+    index($0, k "=") == 1 { if (!done) print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }' "$1" >"$tmp" && mv -f "$tmp" "$1"
+}
+
+json_str() {
+  local s
+  s=$(printf '%s' "$1" | tr -d '\000-\037')
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '"%s"' "$s"
+}
+
+# logs/update.json for the panel. Removed and created afresh with noclobber
+# (O_EXCL), so a symlink planted there is never followed. Not renamed into
+# place: Docker Desktop's file sharing goes on showing the container the
+# old file after a rename.
+status() {
+  local state=$1 message=$2
+  log "$state: $message"
+  rm -f logs/update.json
+  (
+    set -C
+    printf '{"checked_at": %s, "state": %s, "message": %s, "version": %s, "available": %s}\n' \
+      "$(json_str "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$(json_str "$state")" "$(json_str "$message")" \
+      "$(json_str "$(version_of "$(kv_get .env SCS_IMAGE)")")" "$(json_str "${AVAILABLE:-}")" >logs/update.json
+  ) 2>/dev/null || log "couldn't write logs/update.json"
+}
+
+# The release an image was built as (tools/release.sh), or its short digest.
+version_of() {
+  local v
+  [ -n "$1" ] || return 0
+  v=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null \
+      | tr -cd 'A-Za-z0-9._+-')
+  if [ -n "$v" ] && [ "$v" != dev ]; then printf '%s' "$v"
+  else printf '%s' "${1##*@sha256:}" | cut -c1-12
+  fi
+}
+
+container() { docker compose ps -aq "$SERVICE" 2>/dev/null | head -n 1; }
+
+# updates.* through the container: exec into the running one, else a
+# throwaway. Lines are matched against fixed patterns, never evaluated.
+ENABLED=1 CHECK_SECONDS=86400 WAIT_FOR_BROWSER=1
+read_policy() {
+  local out line
+  out=$(docker compose exec -T "$SERVICE" python -m censor_proxy.updates policy 2>/dev/null) \
+    || out=$(docker compose run --rm -T --no-deps "$SERVICE" python -m censor_proxy.updates policy 2>/dev/null) \
+    || { log "couldn't read updates.* from config.yaml; using the defaults"; return 0; }
+  while IFS= read -r line; do
+    case "$line" in
+      enabled=0) ENABLED=0 ;;
+      enabled=1) ENABLED=1 ;;
+      wait_for_browser=0) WAIT_FOR_BROWSER=0 ;;
+      wait_for_browser=1) WAIT_FOR_BROWSER=1 ;;
+      check_hours=*)
+        if [[ ${line#check_hours=} =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+          CHECK_SECONDS=$(awk -v h="${line#check_hours=}" 'BEGIN { printf "%d", h * 3600 }')
+        fi
+        ;;
+    esac
+  done <<<"$out"
+}
+
+browser_open() {
+  local profile
+  profile=$(kv_get .env SCS_PROFILE)
+  [ -n "$profile" ] && pgrep -f -- "--user-data-dir=$profile" >/dev/null 2>&1
+}
+
+# Waits for the recreated container's health check. A restart or an exit
+# fails at once; an image without a HEALTHCHECK passes once it has stayed up.
+wait_healthy() {
+  local cid waited=0 st
+  cid=$(container)
+  [ -n "$cid" ] || return 1
+  while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
+    st=$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}' "$cid" 2>/dev/null) \
+      || return 1
+    case "$st" in
+      "running healthy "*) return 0 ;;
+      *" unhealthy "* | exited* | dead*) return 1 ;;
+      "running none "*) [ "$waited" -lt 30 ] || return 0 ;;
+    esac
+    [ "${st##* }" = 0 ] || return 1
+    sleep 5
+    waited=$((waited + 5))
+  done
+  return 1
+}
+
+# Copies /app/dist out of an image into a new folder; prints its path.
+extract() {
+  local stage
+  stage=$(mktemp -d "$DIR/.stage.XXXXXX") || return 1
+  if docker run --rm --network none --entrypoint tar "$1" -C /app/dist -cf - . | tar -xf - -C "$stage" \
+     && [ -s "$stage/compose.yaml" ] && bash -n "$stage/scs-update" 2>/dev/null; then
+    printf '%s' "$stage"
+  else
+    rm -rf "$stage"
+    return 1
+  fi
+}
+
+# Recreates the container on $1; keeps it if healthy, else goes back.
+apply() {
+  local target=$1 previous stage f
+  previous=$(kv_get .env SCS_IMAGE)
+  log "applying $target (was $previous)"
+  stage=$(extract "$target") || { status error "Couldn't read the files out of release $AVAILABLE."; return 1; }
+  cp -p compose.yaml .compose.yaml.previous
+  mv -f "$stage/compose.yaml" compose.yaml
+  kv_set .env SCS_IMAGE "$target"
+  if docker compose up -d >>update.log 2>&1 && wait_healthy; then
+    # The updater and icon only once the release has proved itself; each
+    # file is renamed in, so this running script keeps reading the old one.
+    for f in "$stage"/* "$stage"/.[!.]*; do
+      [ -e "$f" ] || continue
+      mv -f "$f" "$DIR/"
+    done
+    chmod +x scs-update
+    rm -rf "$stage" .compose.yaml.previous
+    kv_set "$STATE" PENDING ""
+    if [ -n "$previous" ] && [ "$previous" != "$target" ]; then docker image rm "$previous" >/dev/null 2>&1; fi
+    local bad
+    bad=$(kv_get "$STATE" BAD)
+    if [ -n "$bad" ] && [ "$bad" != "$target" ]; then docker image rm "$bad" >/dev/null 2>&1; fi
+    kv_set "$STATE" BAD ""
+    status updated "Updated to $AVAILABLE."
+    return 0
+  fi
+  log "release $AVAILABLE didn't become healthy; its last log lines:"
+  docker compose logs --no-color --tail 40 "$SERVICE" >>update.log 2>&1
+  mv -f .compose.yaml.previous compose.yaml
+  kv_set .env SCS_IMAGE "$previous"
+  docker compose up -d >>update.log 2>&1
+  rm -rf "$stage"
+  kv_set "$STATE" PENDING ""
+  kv_set "$STATE" BAD "$target"
+  # The bad image stays, so a later check sees it is the same release
+  # without downloading it again.
+  status failed "Release $AVAILABLE didn't start, so the proxy is back on $(version_of "$previous"). It will be skipped until a newer one is out; details in $DIR/update.log."
+  return 1
+}
+
+# Pulls the channel; sets PENDING if it is a release not yet running.
+check() {
+  local channel repo latest current bad
+  channel=$(kv_get .env SCS_CHANNEL)
+  [ -n "$channel" ] || { status error "SCS_CHANNEL isn't set in $DIR/.env."; return 1; }
+  repo=${channel%:*}
+  if ! docker pull -q "$channel" >>update.log 2>&1; then
+    status error "Couldn't download $channel (offline, or Docker Hub unreachable)."
+    return 1
+  fi
+  kv_set "$STATE" LAST_CHECK "$(date +%s)"
+  latest=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$channel" 2>/dev/null \
+           | awk -v p="$repo@sha256:" 'index($0, p) == 1 { print; exit }')
+  [ -n "$latest" ] || { status error "Downloaded $channel but found no digest for it."; return 1; }
+  AVAILABLE=$(version_of "$latest")
+  current=$(kv_get .env SCS_IMAGE)
+  bad=$(kv_get "$STATE" BAD)
+  if [ "$latest" = "$current" ]; then
+    kv_set "$STATE" PENDING ""
+    AVAILABLE=""
+    status up_to_date "Running the latest release."
+  elif [ "$latest" = "$bad" ]; then
+    kv_set "$STATE" PENDING ""
+    status skipped "Release $AVAILABLE failed to start here earlier; waiting for a newer one."
+  else
+    kv_set "$STATE" PENDING "$latest"
+  fi
+}
+
+main() {
+  # One run at a time; a lock left by a crash expires after two hours.
+  if [ -d .update.lock ] && [ -n "$(find .update.lock -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
+    rmdir .update.lock 2>/dev/null
+  fi
+  mkdir .update.lock 2>/dev/null || { [ ! -t 1 ] || echo "another scs-update is running"; exit 0; }
+  trap 'rmdir "$DIR/.update.lock" 2>/dev/null; rm -rf "$DIR"/.stage.* "$DIR"/.kv.*' EXIT
+  mkdir -p logs
+
+  if ! docker info >/dev/null 2>&1; then
+    status error "Docker isn't running or can't be reached."
+    exit 1
+  fi
+  local cid st
+  cid=$(container)
+  st=$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null)
+  case "$st" in
+    running | restarting) ;;
+    *) [ "$FORCE" = 1 ] || { log "the proxy isn't running (${st:-no container}); nothing to do"; exit 0; } ;;
+  esac
+
+  read_policy
+  if [ "$ENABLED" = 0 ] && [ "$FORCE" = 0 ]; then
+    status disabled "Automatic updates are off."
+    exit 0
+  fi
+
+  local last now pending
+  last=$(kv_get "$STATE" LAST_CHECK)
+  now=$(date +%s)
+  if [ "$FORCE" = 1 ] || ! [[ $last =~ ^[0-9]+$ ]] || [ $((now - last)) -ge "$CHECK_SECONDS" ]; then
+    check || exit 1
+  fi
+  pending=$(kv_get "$STATE" PENDING)
+  [ -n "$pending" ] || exit 0
+  AVAILABLE=$(version_of "$pending")
+  if [ "$FORCE" = 0 ] && [ "$WAIT_FOR_BROWSER" = 1 ] && browser_open; then
+    status pending "Release $AVAILABLE is downloaded and switches in once the Sissy Browser is closed."
+    exit 0
+  fi
+  apply "$pending"
+}
+
+main

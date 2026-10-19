@@ -1,37 +1,41 @@
 <#
 Sissy Censor System: dedicated browser installer for Windows.
 
-Installs Git, Docker Desktop, Chromium and the sqlite3 tool with winget,
-clones the repository, builds and starts the proxy, and adds a "Sissy
-Browser" shortcut to the Start menu and desktop: a separate Chromium
-profile that always goes through the proxy and trusts its CA in the
-profile's own certificate store. Nothing system-wide changes: no Windows
-proxy, no CA in the Windows store, and your usual browsers are untouched.
-Linux and macOS: install/browser.sh.
+Installs Docker Desktop, Chromium and the sqlite3 tool with winget, pulls
+the proxy image from Docker Hub and starts it from %USERPROFILE%\scs, adds
+an hourly scheduled task that keeps it updated (scs-update.ps1, from the
+image), and adds a "Sissy Browser" shortcut to the Start menu and desktop:
+a separate Chromium profile that always goes through the proxy and trusts
+its CA in the profile's own certificate store. Nothing system-wide changes:
+no Windows proxy, no CA in the Windows store, and your usual browsers are
+untouched. Linux and macOS: install/browser.sh.
 
 Run from a normal PowerShell (winget asks for elevation when it needs it):
 
   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
 
-Remove the shortcut and its profile (keeps Docker Desktop, Chromium and the checkout):
+Remove the shortcut, its profile and the update task (keeps Docker Desktop,
+Chromium and %USERPROFILE%\scs):
 
   powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
 
-Environment overrides: SCS_REPO_URL, SCS_DIR, SCS_BRANCH, SCS_CHROMIUM_EXE.
+Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE.
 #>
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------- settings
-# TODO: replace the placeholder with the real repository URL.
-$ScsRepoUrl = if ($env:SCS_REPO_URL) { $env:SCS_REPO_URL } else { 'https://github.com/OWNER/scs.git' }
-$ScsDir     = if ($env:SCS_DIR) { $env:SCS_DIR } else { Join-Path $env:USERPROFILE 'scs' }
-$ScsBranch  = if ($env:SCS_BRANCH) { $env:SCS_BRANCH } else { 'main' }
-$Uninstall  = $env:SCS_UNINSTALL -eq '1'
+# TODO: replace the placeholder with the Docker Hub repository.
+$ScsImageRepo = if ($env:SCS_IMAGE_REPO) { $env:SCS_IMAGE_REPO } else { 'OWNER/scs' }
+# The tag installs follow; scs-update.ps1 moves to whatever it points at.
+$ScsChannel   = if ($env:SCS_CHANNEL) { $env:SCS_CHANNEL } else { "$ScsImageRepo`:latest" }
+$ScsDir       = if ($env:SCS_DIR) { $env:SCS_DIR } else { Join-Path $env:USERPROFILE 'scs' }
+$Uninstall    = $env:SCS_UNINSTALL -eq '1'
 
 $BrowserName = 'Sissy Browser'
 $ProxyHost = '127.0.0.1'
 $ProxyPort = 8080
-$CaPem = Join-Path $ScsDir 'src\mitmproxy\mitmproxy-ca-cert.pem'
+$CaPem = Join-Path $ScsDir 'mitmproxy\mitmproxy-ca-cert.pem'
+$UpdateTask = 'Sissy Censor System update'
 $DockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
 $ChromiumWingetId = 'Hibbiki.Chromium'
 $BrowserHome = Join-Path $env:LOCALAPPDATA 'SissyBrowser'
@@ -95,26 +99,67 @@ function Start-DockerDesktop {
     }
 }
 
-# ---------------------------------------------------------------- the repo
-function Get-Repo {
-    if (-not (Have git)) { Log 'Installing Git'; Winget-Install 'Git.Git' }
-    if (Test-Path (Join-Path $ScsDir '.git')) {
-        Log "Updating $ScsDir"
-        git -C $ScsDir pull --ff-only
-        if ($LASTEXITCODE -ne 0) { Warn "could not fast-forward $ScsDir; continuing with what is there" }
-    } else {
-        if ($ScsRepoUrl -like '*OWNER/*') { Die 'SCS_REPO_URL is still the placeholder; set it to the real repository URL' }
-        Log "Cloning $ScsRepoUrl into $ScsDir"
-        git clone --branch $ScsBranch $ScsRepoUrl $ScsDir
-        if ($LASTEXITCODE -ne 0) { Die 'git clone failed' }
+# --------------------------------------------------------------- the proxy
+# KEY=value in scs\.env, which compose reads; other keys are kept.
+function Set-EnvValue($key, $value) {
+    $file = Join-Path $ScsDir '.env'
+    $lines = @(if (Test-Path $file) { Get-Content $file } else { '# Compose settings for this install (written by the installer and scs-update).' })
+    $done = $false
+    $out = foreach ($l in $lines) {
+        if ($l.StartsWith("$key=")) { if (-not $done) { "$key=$value"; $done = $true } } else { $l }
+    }
+    if (-not $done) { $out = @($out) + "$key=$value" }
+    [System.IO.File]::WriteAllLines($file, [string[]]@($out), (New-Object System.Text.UTF8Encoding $false))
+}
+
+# Earlier installers cloned the repository and built the image in
+# $ScsDir\src. Stop that container and keep its CA (which the profile
+# already trusts) and settings.
+function Move-OldCheckout {
+    $old = Join-Path $ScsDir 'src'
+    if (-not (Test-Path (Join-Path $old 'compose.yaml'))) { return }
+    Log 'Moving the CA and settings out of the old checkout layout'
+    Push-Location $old
+    try { docker compose down } finally { Pop-Location }
+    foreach ($d in 'mitmproxy', 'config') {
+        $from = Join-Path $old $d; $to = Join-Path $ScsDir $d
+        if ((Test-Path $from) -and -not (Test-Path $to)) { Copy-Item -Recurse $from $to }
     }
 }
 
+function Get-Proxy {
+    if ($ScsChannel -like 'OWNER/*') { Die 'SCS_IMAGE_REPO is still the placeholder; set it to the Docker Hub repository' }
+    Log "Downloading $ScsChannel (over a gigabyte the first time)"
+    docker pull $ScsChannel
+    if ($LASTEXITCODE -ne 0) { Die "docker pull $ScsChannel failed" }
+    $repo = $ScsChannel.Substring(0, $ScsChannel.LastIndexOf(':'))
+    $image = docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' $ScsChannel |
+        Where-Object { $_.StartsWith("$repo@sha256:") } | Select-Object -First 1
+    if (-not $image) { Die "pulled $ScsChannel but found no digest for it" }
+    New-Item -ItemType Directory -Force -Path $ScsDir | Out-Null
+    Move-OldCheckout
+    foreach ($d in 'mitmproxy', 'config', 'logs') { New-Item -ItemType Directory -Force -Path (Join-Path $ScsDir $d) | Out-Null }
+    # compose.yaml and the updater come out of the image.
+    $cid = docker create $image
+    if ($LASTEXITCODE -ne 0) { Die 'docker create failed' }
+    docker cp "${cid}:/app/dist/." $ScsDir
+    $copied = $LASTEXITCODE
+    docker rm $cid | Out-Null
+    if ($copied -ne 0) { Die 'could not copy the install files out of the image' }
+    Set-EnvValue 'SCS_CHANNEL' $ScsChannel
+    Set-EnvValue 'SCS_IMAGE' $image
+    # scs-update.ps1 applies an update only while no browser runs on this profile.
+    Set-EnvValue 'SCS_PROFILE' $ProfileDir
+}
+
 function Start-Proxy {
-    Log 'Building and starting the proxy (the first build downloads a few hundred MB)'
-    Push-Location (Join-Path $ScsDir 'src')
+    $other = docker ps --filter "publish=$ProxyPort" --format '{{.Names}} {{.Label "com.docker.compose.project"}}' |
+        Where-Object { ($_ -split ' ')[1] -ne 'scs' } | Select-Object -First 1
+    if ($other) { $name = ($other -split ' ')[0]; Die "another container ($name) holds port $ProxyPort; stop it (docker stop $name) and rerun" }
+    Log 'Starting the proxy'
+    Push-Location $ScsDir
     try {
-        docker compose up -d --build
+        docker compose up -d
         if ($LASTEXITCODE -ne 0) { Die 'docker compose up failed' }
     } finally { Pop-Location }
     $waited = 0
@@ -129,10 +174,29 @@ function Start-Proxy {
             [void](Invoke-WebRequest -Uri 'http://censor.local/health' -Proxy "http://$ProxyHost`:$ProxyPort" -UseBasicParsing -TimeoutSec 15)
             break
         } catch {
-            if ($waited -ge 60) { Warn "health check through the proxy failed; check 'docker compose logs' in $ScsDir\src"; break }
+            if ($waited -ge 60) { Warn "health check through the proxy failed; check 'docker compose logs' in $ScsDir"; break }
             Start-Sleep 3; $waited += 3
         }
     }
+}
+
+# The hourly scs-update.ps1 run, as a task of this user. conhost --headless
+# keeps a console window from showing.
+function Install-Updater {
+    Log 'Adding the hourly update check'
+    $script = Join-Path $ScsDir 'scs-update.ps1'
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+        -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`""
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10) -RepetitionInterval (New-TimeSpan -Hours 1)
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    Register-ScheduledTask -TaskName $UpdateTask -Action $action -Trigger $trigger -Settings $settings `
+        -Description 'Keeps the Sissy Censor System proxy up to date' -Force | Out-Null
+}
+
+function Uninstall-Updater {
+    Log 'Removing the update task'
+    Unregister-ScheduledTask -TaskName $UpdateTask -Confirm:$false -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------- chromium
@@ -330,19 +394,21 @@ function Uninstall-Shortcuts {
 # -------------------------------------------------------------------- main
 if ($Uninstall) {
     Uninstall-Shortcuts
+    Uninstall-Updater
     Log "Done. Docker Desktop, Chromium and $ScsDir were left in place; stop the proxy with"
-    Write-Host "    cd $ScsDir\src; docker compose down"
+    Write-Host "    cd $ScsDir; docker compose down"
     exit 0
 }
 
 Install-DockerDesktop
 Start-DockerDesktop
-Get-Repo
+Get-Proxy
 Start-Proxy
 $chromium = Install-Chromium
 Install-Shortcuts $chromium
 Seed-Profile
 Trust-CaInProfile $chromium
+Install-Updater
 
 Log 'Installed'
 Write-Host @"
@@ -350,8 +416,8 @@ Write-Host @"
     Profile:      $ProfileDir (bookmark bar: $AdminBookmark)
     Proxy:        $ProxyHost`:$ProxyPort (Docker, starts with Windows)
     Admin panel:  http://localhost:8082/admin
-    Checkout:     $ScsDir
+    Install:      $ScsDir (updates itself hourly from $ScsChannel)
     Only $BrowserName goes through the proxy; your other browsers are unchanged.
     The CA is trusted inside the profile: rerun this installer if you ever
-    delete $ScsDir\src\mitmproxy and the proxy makes a new CA.
+    delete $ScsDir\mitmproxy and the proxy makes a new CA.
 "@

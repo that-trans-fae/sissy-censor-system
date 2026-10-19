@@ -52,7 +52,7 @@ def panel(tmp_path):
                     f"logging:\n  path: '{tmp_path / 'detections.jsonl'}'\n")
     cfg = load_config(path)
     app = FakeApp(cfg, VideoJobs(cfg))
-    server = AdminServer(cfg, app, UserConfigFile(path))
+    server = AdminServer(cfg, app, UserConfigFile(path), update_status=tmp_path / "update.json")
     server.start()
     yield Client(port), app, server, path
     server.stop()
@@ -88,6 +88,20 @@ class Client:
         except ValueError:
             payload = raw
         return r, payload
+
+
+def test_status_shows_version_and_updates(panel, tmp_path, monkeypatch):
+    client, app, server, path = panel
+    monkeypatch.setenv("SCS_VERSION", "1.2.0")
+    _, body = client("GET", "/admin/api/status")
+    assert body["version"] == "1.2.0"
+    assert body["updates"] == {"enabled": True, "check_hours": 24, "wait_for_browser": True, "last": None}
+    (tmp_path / "update.json").write_text(json.dumps({"state": "pending", "message": "Waiting."}))
+    r, body = client("POST", "/admin/api/config", {"set": {"updates.enabled": False}})
+    assert r.status == 200
+    _, body = client("GET", "/admin/api/status")
+    assert body["updates"]["enabled"] is False and body["updates"]["last"]["state"] == "pending"
+    assert "enabled: false" in path.read_text()
 
 
 def test_panel_served_on_allowed_hosts_only(panel):

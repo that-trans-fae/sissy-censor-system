@@ -1,16 +1,18 @@
 # Installer
 
 A one-line installer that runs straight from GitHub. It installs Docker
-(Docker Engine on Linux, Docker Desktop on macOS and Windows), clones this
-repository, builds and starts the proxy, and sets up
-a dedicated "Sissy Browser" for it. Nothing system-wide changes: no system
-proxy, no CA in the system trust store, and your other browsers are
-untouched.
+(Docker Engine on Linux, Docker Desktop on macOS and Windows), pulls the
+proxy image from Docker Hub and starts it, adds a job that keeps it
+updated, and sets up a dedicated "Sissy Browser" for it. Nothing
+system-wide changes: no system proxy, no CA in the system trust store, and
+your other browsers are untouched. No source code is downloaded: everything
+the install needs comes out of the image.
 
 Replace `OWNER` in the URLs below with the GitHub account that hosts the
-repository. Each script carries the same placeholder in `SCS_REPO_URL`
-(marked `TODO` near the top); set it there before publishing, or pass the
-real URL in the environment when running.
+installers. The scripts carry a Docker Hub placeholder too,
+`SCS_IMAGE_REPO` (marked `TODO` near the top, as in
+`src/tools/release.sh`); set it there before publishing, or pass the real
+repository in the environment when running.
 
 | Script | Platform |
 | --- | --- |
@@ -21,7 +23,7 @@ real URL in the environment when running.
 
 Installs Chromium (snap or distribution package on Linux, Homebrew cask on
 macOS, winget on Windows) and adds a **Sissy Browser** launcher with its
-own icon (`docs/brand/browser-icon.svg`). It opens a separate profile with
+own icon (`docs/brand/browser-icon.svg`, shipped in the image). It opens a separate profile with
 `--proxy-server=127.0.0.1:8080` and trusts the proxy's CA in that profile's
 own certificate store (the "Installed by you" list in
 `chrome://certificate-manager`, which needs Chromium 134 or newer), so
@@ -59,18 +61,65 @@ Where it lands:
   `%LOCALAPPDATA%\SissyBrowser`. The CA's key hash is baked into the
   shortcut, so rerun the installer if the proxy ever makes a new CA.
 
+The proxy itself runs from `~/scs` (`%USERPROFILE%\scs`):
+
+| Path | What |
+| --- | --- |
+| `compose.yaml` | The service, from the image; replaced at each update |
+| `.env` | `SCS_IMAGE` (the running release, by digest), `SCS_CHANNEL`, your uid:gid, the browser profile; add `SCS_PROXY_PORT` or `SCS_ADMIN_PORT` to move the ports |
+| `config/config.yaml` | Your settings, written by the admin panel |
+| `mitmproxy/` | The CA, kept across updates |
+| `logs/` | Detection log; `update.json` is the last update result |
+| `scs-update`, `scs-update.ps1` | The updater, from the image |
+| `update.log` | Every update run |
+
+## Updates
+
+The installer adds an hourly job: a systemd user timer `scs-update.timer`
+on Linux (it runs while you are logged in), a launchd agent
+`local.scs.update` on macOS, and a scheduled task "Sissy Censor System
+update" on Windows. Each run of `scs-update`:
+
+1. reads `updates.*` from your settings. With automatic updates off (the
+   switch on the admin panel's Overview) it stops here.
+2. at most once a day (`updates.check_hours`), pulls `SCS_CHANNEL`
+   (`OWNER/scs:latest`) from Docker Hub. This is the only thing the install
+   sends to the internet on its own.
+3. if that is a new release and the Sissy Browser is closed
+   (`updates.wait_for_browser`), switches the proxy to it: the new
+   `compose.yaml` goes in place, `SCS_IMAGE` in `.env` moves to the new
+   digest and the container is recreated, which takes the proxy away for a
+   few seconds.
+4. keeps the new release once its health check passes, usually within 15
+   seconds. If it doesn't pass within five minutes, the old `compose.yaml`
+   and image go back, and that release is skipped until a newer one is out.
+
+The result shows on the admin panel's Overview (Updates) and is logged in
+`update.log`. To check and update at once, even with the browser open:
+
+```bash
+~/scs/scs-update --now
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\scs\scs-update.ps1 -Now
+```
+
+To stay on a release, set `SCS_CHANNEL` in `.env` to a version tag such as
+`OWNER/scs:1.2.0`, or turn automatic updates off on the panel.
+
 ## Options and undo
 
 Both scripts read these environment variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SCS_REPO_URL` | placeholder | Repository to clone |
-| `SCS_DIR` | `~/scs` (`%USERPROFILE%\scs`) | Where to clone it |
-| `SCS_BRANCH` | `main` | Branch to check out |
-| `SCS_UNINSTALL` | unset | `1` removes the launcher and its profile |
+| `SCS_IMAGE_REPO` | placeholder | Docker Hub repository |
+| `SCS_CHANNEL` | `$SCS_IMAGE_REPO:latest` | Tag to install and follow |
+| `SCS_DIR` | `~/scs` (`%USERPROFILE%\scs`) | Where the proxy runs from |
+| `SCS_UNINSTALL` | unset | `1` removes the launcher, its profile and the update job |
 
-Undo keeps Docker, Chromium and the checkout:
+Undo keeps Docker, Chromium and `~/scs`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | SCS_UNINSTALL=1 bash
@@ -80,8 +129,11 @@ curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh |
 powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
 ```
 
-Rerunning the installer is safe: it updates the checkout, rebuilds the
-image and reapplies the settings.
+Rerunning the installer is safe: it installs the channel's current
+release straight away (without the health check that `scs-update` does)
+and reapplies the settings. An install made by an earlier version of the
+installer, which cloned the repository into `~/scs`, is moved over: its
+container is stopped and its CA and settings are copied out of `~/scs/src`.
 
 ## First run notes
 
@@ -89,9 +141,15 @@ image and reapplies the settings.
   the distribution's packages) and starts with the machine. The installer
   adds you to the `docker` group and uses sudo for Docker until you log out
   and back in.
-- The container runs as your uid:gid, so it can write its CA into the
-  checkout: the installer writes them to `src/.env`, which `user:` in
-  `src/compose.yaml` reads.
+- The container runs as your uid:gid, so it can write its CA into
+  `~/scs/mitmproxy`: the installer writes them to `.env`, which `user:` in
+  `compose.yaml` reads.
+- The first download is over a gigabyte (Python, ffmpeg and both models).
+  Updates download only the layers that changed.
+- If another container already holds port 8080 (a development copy run from
+  `src/`, say), the installer stops and names it.
+- The Windows task runs through `conhost --headless` so no console window
+  flashes up each hour.
 - macOS and Windows: Docker Desktop shows its service agreement on first
   start; the scripts wait (up to 15 minutes) until it is accepted and the
   engine is up.

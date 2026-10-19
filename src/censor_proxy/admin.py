@@ -25,7 +25,7 @@ Any page you browse can send requests to both, so:
 With a PIN set, everything but the page itself, session and unlock answers
 401 until unlocked. Wrong PINs are never locked out; they are recorded
 (admin.attempts_log) and reported after the next unlock.
-  GET  /admin/api/status
+  GET  /admin/api/status          including the version and scs-update's last result
   GET  /admin/api/log
   GET  /admin/api/jobs
   POST /admin/api/jobs/<id>/cancel
@@ -60,7 +60,7 @@ from urllib.parse import parse_qs, urlsplit
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
-from . import config
+from . import config, updates
 from .config import AdminConfig, Config, ConfigError
 from .video import Job, VideoJobs
 
@@ -513,10 +513,12 @@ def job_view(job: Job, ready_seconds: float) -> dict:
 # -- the server -------------------------------------------------------------
 
 class AdminServer:
-    def __init__(self, cfg: Config, app: App, config_file: UserConfigFile):
+    def __init__(self, cfg: Config, app: App, config_file: UserConfigFile,
+                 update_status: Path = updates.STATUS_FILE):
         self.cfg = cfg
         self.app = app
         self.file = config_file
+        self.update_status = update_status
         self.pin = PinLock(cfg.admin)
         self.attempts = AttemptLog(cfg.admin.attempts_log)
         # Startup values, to tell which restart-only settings are pending.
@@ -800,7 +802,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {**admin.app.status(), "pin_set": pin.pin_set,
                                     "wrong_pin_entries": len(admin.attempts.unacknowledged()),
                                     "config_path": str(admin.file.path) if admin.file.path else None,
-                                    "config_editable": admin.file.editable})
+                                    "config_editable": admin.file.editable,
+                                    "version": updates.version(),
+                                    "updates": {"enabled": admin.cfg.updates.enabled,
+                                                "check_hours": admin.cfg.updates.check_hours,
+                                                "wait_for_browser": admin.cfg.updates.wait_for_browser,
+                                                "last": updates.read_status(admin.update_status)}})
         if (method, name) == ("GET", "log"):
             query = parse_qs(urlsplit(self.path).query)
             try:

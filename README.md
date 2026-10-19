@@ -34,7 +34,9 @@ other behaviour are configurable.
 
 A one-line installer for a dedicated "Sissy Browser" (Linux, macOS and
 Windows) that uses the proxy without touching system settings is in
-[`install/`](install/README.md). By hand, from `src/`:
+[`install/`](install/README.md). It runs the image from Docker Hub and
+keeps it updated: a new release is switched in while the browser is closed,
+and rolled back if it doesn't start. By hand, from `src/`:
 
 ```bash
 docker compose up -d --build

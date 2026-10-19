@@ -96,6 +96,20 @@ Last updated Oct 19, 2026.
   syntax-checked only. The
   repository URL is still a placeholder
 
+- Distribution and automatic updates (Oct 19, 2026): the installers pull
+  the image from Docker Hub and copy its `dist/` files out (no clone, no
+  build), and an hourly host job (`scs-update`) installs new releases while
+  the Sissy Browser is closed, keeps them once the image's health check
+  passes, and rolls back and skips them otherwise. The result and an on/off
+  switch are on the panel's Overview; `tools/release.sh` publishes amd64
+  and arm64. Verified on Linux against a local registry with three
+  releases (pending while the browser ran, applied after, a broken release
+  rolled back and skipped, the panel switch) and with pytest against a
+  fake docker. Not yet: a real Docker Hub push (the repository is still the
+  `OWNER/scs` placeholder) or an arm64 build; the systemd timer, launchd
+  agent and Windows task are written but untried, and the PowerShell
+  updater is parse-checked only
+
 ## Not done yet
 
 - **Video**: built and tested end to end with curl (injection, CSP, jobs),

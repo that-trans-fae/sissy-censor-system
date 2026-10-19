@@ -36,8 +36,28 @@ PY
 COPY censor_proxy/ censor_proxy/
 COPY censor.py .
 
+# What the host needs, copied out by the installer and by scs-update after
+# each update: the compose file, the updaters and the browser icon. The icon
+# comes from docs/brand through the "brand" build context (compose.yaml and
+# tools/release.sh pass it; by hand: --build-context brand=../docs/brand).
+COPY dist/ dist/
+COPY --from=brand browser-icon.svg dist/
+
 EXPOSE 8080 8082
 ENV CENSOR_CONFIG=/config/config.yaml
+
+# Healthy once the proxy answers on its health host with the models loaded:
+# scs-update waits for this before keeping an update, and goes back to the
+# old image if it never comes. start-period covers loading the models.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=180s --start-interval=5s --retries=3 \
+    CMD ["python", "-m", "censor_proxy.updates", "health"]
+
+# The release, set by tools/release.sh; last so a new version rebuilds no
+# other layer.
+ARG SCS_VERSION=dev
+ENV SCS_VERSION=$SCS_VERSION
+LABEL org.opencontainers.image.title="Sissy Censor System" \
+      org.opencontainers.image.version=$SCS_VERSION
 
 # No stream_large_bodies: mitmproxy applies it after the addon's
 # responseheaders hook, which would stream large images past the censor. The

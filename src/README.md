@@ -175,7 +175,9 @@ Open either:
 Tabs:
 
 - **Overview**: counts since start (censored, clean, whitelisted, failed
-  closed...), the model and the log level.
+  closed...), the model and the log level, and **Updates**: the running
+  version, the last update check, and the switch for automatic updates
+  (`updates.enabled`; see [Releases and updates](#releases-and-updates)).
 - **Whitelist**: the [whitelist](#whitelist). Add or remove your domains;
   the built-in list is shown read-only below them. The checkbox is
   `whitelist.match_referer`.
@@ -258,6 +260,38 @@ Once the boxes are confirmed, copy `review/detections.json` to
 `tests/fixtures/expected-<model>.json` (`640m` or `320n`) to make it that
 model's regression fixture; `tests/test_samples.py` checks each fixture with
 its own model, whatever the configured default.
+
+## Releases and updates
+
+Installs run the published image, not this folder: the installers in
+[`../install`](../install/README.md) pull it from Docker Hub and copy
+[`dist/`](dist) out of it (the users' `compose.yaml` and the `scs-update`
+updaters). To release:
+
+```bash
+tools/release.sh 1.2.0
+```
+
+It needs a clean checkout and `docker login`, builds for amd64 and arm64,
+pushes `VERSION` and `latest`, and tags the commit `v1.2.0`. Installs pick
+up `latest` within a day (`updates.check_hours`) once the Sissy Browser is
+closed, and go back to the release they had if the new one's health check
+(`python -m censor_proxy.updates health`, the image's `HEALTHCHECK`) doesn't
+pass within five minutes. So that old installs keep starting:
+
+- renaming or removing a config key needs an entry in `config.MIGRATIONS`
+  (unknown keys are rejected, so an old `config.yaml` would otherwise stop
+  the new release from starting);
+- a new variable in `dist/compose.yaml` needs a default, since users'
+  `.env` files predate it;
+- `dist/compose.yaml` stays in step with `compose.yaml` here
+  (`tests/test_dist.py`).
+
+For a trial run without Docker Hub, push to a local registry
+(`docker run -d -p 127.0.0.1:5055:5000 registry:2`, then
+`SCS_IMAGE_REPO=localhost:5055/scs SCS_PLATFORMS=linux/amd64
+tools/release.sh ...` on a scratch commit, or plain `docker build` and
+`docker push`) and install with `SCS_IMAGE_REPO=localhost:5055/scs`.
 
 ## Test
 

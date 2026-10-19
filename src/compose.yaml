@@ -1,6 +1,12 @@
 services:
   censor-proxy:
-    build: .
+    # Development build. Installs use dist/compose.yaml (the same service
+    # on the released image); keep the two in step (tests/test_dist.py).
+    build:
+      context: .
+      # The browser icon for dist/ (see the Dockerfile).
+      additional_contexts:
+        brand: ../docs/brand
     image: censor-proxy
     restart: unless-stopped
     ports:

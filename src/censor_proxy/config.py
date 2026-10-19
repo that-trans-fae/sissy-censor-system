@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -21,8 +22,16 @@ CUSTOM_RESOURCES = "custom"
 # Detection keys a preset can't set.
 PRESET_KEYS = frozenset({"preset", "presets"})
 LOG_LEVELS = ("off", "info", "debug")
+# Keys renamed or removed since a release, so a config.yaml written for an
+# older image still loads after an automatic update (unknown keys are
+# rejected): "section.key" (or a whole "section") mapped to its new name, or
+# to None when it was dropped. Never reuse a dropped name.
+MIGRATIONS: dict[str, str | None] = {}
 DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)*"
                     r"[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$")
+
+
+log = logging.getLogger("censor_proxy.config")
 
 
 class ConfigError(ValueError):
@@ -256,6 +265,13 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class UpdatesConfig:
+    enabled: bool
+    check_hours: float
+    wait_for_browser: bool
+
+
+@dataclass(frozen=True)
 class Config:
     model: ModelConfig
     detection: DetectionConfig
@@ -269,6 +285,7 @@ class Config:
     admin: AdminConfig
     cache: CacheConfig
     logging: LoggingConfig
+    updates: UpdatesConfig
 
 
 def normalize_domain(value: str) -> str:
@@ -281,6 +298,36 @@ def normalize_domain(value: str) -> str:
     if not value.startswith("["):
         value = value.split(":", 1)[0]
     return value.removeprefix("*.").strip(".").removeprefix("www.")
+
+
+def migrate(override: dict, migrations: dict[str, str | None] | None = None) -> dict:
+    """The override with renamed keys moved and dropped ones removed. A value
+    already set under the new name wins."""
+    migrations = MIGRATIONS if migrations is None else migrations
+    out = {k: dict(v) if isinstance(v, dict) else v for k, v in override.items()}
+    for old, new in migrations.items():
+        section, _, key = old.partition(".")
+        if key:
+            if not isinstance(out.get(section), dict) or key not in out[section]:
+                continue
+            value = out[section].pop(key)
+            if not out[section]:
+                del out[section]
+        else:
+            if section not in out:
+                continue
+            value = out.pop(section)
+        log.warning("config: %s is %s", old, f"now {new}" if new else "no longer used; ignored")
+        if new is None:
+            continue
+        new_section, _, new_key = new.partition(".")
+        if new_key:
+            target = out.setdefault(new_section, {})
+            if isinstance(target, dict):
+                target.setdefault(new_key, value)
+        else:
+            out.setdefault(new_section, value)
+    return out
 
 
 def _merge(defaults: dict, override: dict) -> dict:
@@ -425,6 +472,9 @@ def _build(raw: dict[str, Any]) -> Config:
         }),
         "cache": CacheConfig(**raw["cache"]),
         "logging": LoggingConfig(**raw["logging"]),
+        "updates": UpdatesConfig(enabled=bool(raw["updates"]["enabled"]),
+                                 check_hours=float(raw["updates"]["check_hours"]),
+                                 wait_for_browser=bool(raw["updates"]["wait_for_browser"])),
     }
     cfg = Config(**sections)
     _validate(cfg)
@@ -491,6 +541,8 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("admin.port and proxy.internal_port must differ")
     if cfg.admin.session_seconds <= 0:
         raise ConfigError("admin.session_seconds must be > 0")
+    if cfg.updates.check_hours <= 0:
+        raise ConfigError("updates.check_hours must be > 0")
 
 
 def defaults() -> dict:
@@ -501,6 +553,7 @@ def merged(override: dict, apply_preset: bool = True) -> dict:
     """The effective raw config: defaults with a user override merged in, and
     the detection preset applied (unless apply_preset is false)."""
     defaults_ = defaults()
+    override = migrate(override)
     raw = _merge(defaults_, override)
     # Presets merge by name, so config.yaml can add any number without
     # repeating the built-in ones; a preset set to null is removed.

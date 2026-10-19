@@ -63,6 +63,18 @@
       <div class="card"><h2>Detection</h2><dl id="info-detection"></dl></div>
       <div class="card"><h2>Proxy</h2><dl id="info-proxy"></dl></div>
     </div>
+    <div class="card">
+      <h2>Updates</h2>
+      <dl id="info-updates"></dl>
+      <label class="check">
+        <input type="checkbox" id="upd-enabled">
+        <span>Install new releases automatically. A job on this computer checks Docker Hub
+          about once a day, and switches the proxy to a new release while the Sissy Browser is
+          closed (going back if the new one doesn't start). It is the only thing that
+          contacts the internet on its own.</span>
+      </label>
+      <p class="error" id="upd-error" role="alert"></p>
+    </div>
   </section>
 
   <section id="whitelist" class="tab" hidden>

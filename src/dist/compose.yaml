@@ -1,0 +1,50 @@
+# The Sissy Censor System proxy, as installed by install/browser.sh or
+# browser.ps1. This file comes out of the image and is replaced at every
+# update, so don't edit it: settings go in .env next to it (SCS_UID,
+# SCS_GID, SCS_PROXY_PORT, SCS_ADMIN_PORT) or in config/config.yaml.
+# Keep it in step with src/compose.yaml (tests/test_dist.py checks); a new
+# variable here needs a default, since .env may predate it.
+# The compose project: the container is scs-censor-proxy-1 wherever this is.
+name: scs
+services:
+  censor-proxy:
+    # Pinned by digest: scs-update moves it after a new release passes its
+    # health check, so nothing else (a restart, the launcher's
+    # `docker compose up`) can start an unchecked image.
+    image: ${SCS_IMAGE:?SCS_IMAGE is set in .env by the installer}
+    pull_policy: missing
+    restart: unless-stopped
+    ports:
+      # Loopback only: never expose an intercepting proxy to the LAN.
+      - "127.0.0.1:${SCS_PROXY_PORT:-8080}:8080"
+      # Admin panel: http://localhost:8082/admin (also https://scs.local/admin
+      # through the proxy).
+      - "127.0.0.1:${SCS_ADMIN_PORT:-8082}:8082"
+    # Unprivileged: the uid:gid the service runs as, your `id -u`:`id -g`
+    # (the installer writes them to .env), so it can write ./mitmproxy,
+    # ./config and ./logs.
+    user: "${SCS_UID:-1000}:${SCS_GID:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      # Keeps the CA stable across updates, so trust is installed once.
+      - ./mitmproxy:/mitmproxy
+      # Writable: the admin panel saves settings to config/config.yaml.
+      - ./config:/config
+      # Also where scs-update leaves its result (update.json) for the panel.
+      - ./logs:/logs
+      # Scratch and the censored-video cache (video.cache_dir): memory-backed,
+      # sized for video.cache_max_bytes plus work in progress.
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 3221225472
+    # A compromised proxy is a compromise of every page in the browser, so
+    # the container gets the least it can run with: an unprivileged user, a
+    # read-only root (the mounts above are the only writable paths), no
+    # capabilities, and no privilege gain through setuid binaries.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -228,7 +228,41 @@
       ["Panel", `https://${s.admin_host}/admin`],
       ["PIN lock", s.pin_set ? "on" : "off"],
     ]));
+    renderUpdates(s);
   }
+
+  // scs-update's states (src/dist/scs-update), as the panel words them.
+  const UPDATE_STATES = { up_to_date: "Up to date", pending: "Update waiting", updated: "Updated",
+                          failed: "Update failed", skipped: "Update skipped", disabled: "Off",
+                          error: "Couldn't check" };
+
+  function renderUpdates(s) {
+    const u = s.updates || {};
+    const last = u.last;
+    const rows = [["Version", s.version || "dev"]];
+    if (!last) {
+      rows.push(["Last check", "never (no update job has run on this computer yet)"]);
+    } else {
+      const when = parseTs(last.checked_at);
+      rows.push(["Last check", when ? `${fmtTime(when)}: ${UPDATE_STATES[last.state] || last.state}` : "unknown"]);
+      if (last.message) rows.push(["", last.message]);
+    }
+    $("info-updates").replaceChildren(...rows.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })]));
+    const box = $("upd-enabled");
+    if (!box.matches(":focus")) box.checked = !!u.enabled;
+    box.disabled = !s.config_editable;
+  }
+
+  $("upd-enabled").addEventListener("change", async (e) => {
+    $("upd-error").textContent = "";
+    try {
+      await saveSettings({ "updates.enabled": e.target.checked });
+      toast(e.target.checked ? "Automatic updates on" : "Automatic updates off");
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      if (err.status !== 401) $("upd-error").textContent = err.message;
+    }
+  });
 
   // ---- config (whitelist and settings share it) -------------------------
 
