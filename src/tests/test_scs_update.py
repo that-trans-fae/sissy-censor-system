@@ -68,9 +68,10 @@ elif args[:1] == ["run"] and "tar" in args:
     ref = args[args.index("tar") + 1]
     out = io.BytesIO()
     with tarfile.open(fileobj=out, mode="w") as t:
+        updater = state["updaters"].get(ref) or Path(os.environ["REAL_UPDATER"]).read_text()
         for name, body in (("compose.yaml", f"# compose for {ref}\n"),
                            ("compose.vaapi.yaml", f"# vaapi for {ref}\n"),
-                           ("scs-update", "#!/usr/bin/env bash\necho next updater\n"),
+                           ("scs-update", updater),
                            ("browser-icon.svg", "<svg/>\n")):
             data = body.encode()
             info = tarfile.TarInfo(name)
@@ -110,7 +111,9 @@ def install(tmp_path):
             data = json.loads(path.read_text()) if path.exists() else {
                 "policy": "enabled=1\nwait_for_browser=1",
                 "latest": NEW, "running": OLD, "broken": [],
-                "versions": {OLD: "1.0.0", NEW: "1.1.0"}}
+                "versions": {OLD: "1.0.0", NEW: "1.1.0"},
+                # The updater each release ships; the others ship this one.
+                "updaters": {NEW: "#!/usr/bin/env bash\necho next updater\n"}}
             data.update(changes)
             path.write_text(json.dumps(data))
             return data
@@ -125,7 +128,7 @@ def install(tmp_path):
             pgrep.chmod(0o755)
             self.browser_checks = lambda: int(count.read_text())
             env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "FAKE_DOCKER": str(home),
-                   "SCS_UPDATE_POLL": "0", "SCS_UPDATE_PULL_TRIES": "3"}
+                   "SCS_UPDATE_POLL": "0", "SCS_UPDATE_PULL_TRIES": "3", "REAL_UPDATER": str(SCRIPT)}
             subprocess.run(["bash", str(root / "scs-update"), *args], env=env, cwd=tmp_path,
                            check=False, capture_output=True, timeout=60)
 
@@ -189,6 +192,32 @@ def test_up_to_date(install):
     assert ran(calls, "pull") and not ran(calls, "compose", "up")
     assert install.status()["state"] == "up_to_date"
     assert install.env("SCS_IMAGE") == OLD
+
+
+def test_up_to_date_finishes_a_cut_off_update(install):
+    # A run stopped after recreating the container on NEW (pinned in .env)
+    # but before moving the new updater and icon in.
+    env = (install.path / ".env").read_text().replace(OLD, NEW)
+    (install.path / ".env").write_text(env)
+    (install.path / ".compose.yaml.previous").write_text("# compose for the old release\n")
+    install.state(running=NEW)
+    install.run()
+    calls = install.calls()
+    assert not ran(calls, "compose", "up")
+    assert "next updater" in (install.path / "scs-update").read_text()
+    assert os.access(install.path / "scs-update", os.X_OK)
+    assert (install.path / "browser-icon.svg").exists()
+    assert not list(install.path.glob(".compose*.previous")) and not list(install.path.glob(".stage.*"))
+    assert install.status()["state"] == "up_to_date"
+
+
+def test_up_to_date_leaves_matching_files(install):
+    install.state(latest=OLD)
+    install.run()
+    install.calls()
+    before = (install.path / "scs-update").stat().st_ino
+    install.run()
+    assert (install.path / "scs-update").stat().st_ino == before
 
 
 def test_checks_on_every_run(install):

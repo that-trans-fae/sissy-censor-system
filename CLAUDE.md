@@ -140,7 +140,9 @@ host job (systemd user timer, launchd agent or scheduled task) runs
 for Docker and the proxy, pulls the channel once (retrying while the network comes up),
 waits for the Sissy Browser to close, recreates the container on a new
 digest, waits for the image's `HEALTHCHECK`, and otherwise restores the
-old compose.yaml and digest and skips that release. It writes
+old compose.yaml and digest and skips that release. When already up to
+date it puts back any of the running release's files (the updater, icons)
+that differ, finishing an update cut off mid-way. It writes
 `logs/update.json`, which the panel's Overview shows. The container never
 contacts Docker Hub and has no Docker socket. See `docs/decisions.md`.
 

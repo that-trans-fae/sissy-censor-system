@@ -181,6 +181,26 @@ extract() {
   fi
 }
 
+# Puts the running release's other files (the updater, the icons) in place
+# where they differ. A run cut off between recreating the container and
+# moving them in (a shutdown during the health check) leaves the new
+# release running with the old updater, and later runs, finding nothing to
+# update, would never finish the job. The compose files went in first.
+sync_files() {
+  local stage f name changed=""
+  stage=$(extract "$1") || { log "couldn't read the files out of the running release"; return 0; }
+  for f in "$stage"/* "$stage"/.[!.]*; do
+    [ -f "$f" ] || continue
+    name=${f##*/}
+    case $name in compose*.yaml) continue ;; esac
+    cmp -s "$f" "$DIR/$name" && continue
+    mv -f "$f" "$DIR/" && changed="$changed $name"
+  done
+  chmod +x scs-update
+  rm -rf "$stage" .compose*.yaml.previous
+  [ -z "$changed" ] || log "put the running release's files in place:$changed"
+}
+
 # Recreates the container on $1; keeps it if healthy, else goes back.
 apply() {
   local target=$1 previous stage f
@@ -258,6 +278,7 @@ check() {
   bad=$(kv_get "$STATE" BAD)
   if [ "$latest" = "$current" ]; then
     AVAILABLE=""
+    sync_files "$current"
     status up_to_date "Running the latest release."
   elif [ "$latest" = "$bad" ]; then
     status skipped "Release $AVAILABLE failed to start here earlier; waiting for a newer one."

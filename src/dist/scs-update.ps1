@@ -151,6 +151,26 @@ function Extract($image) {
     return $stage
 }
 
+# Puts the running release's other files (the updater, the icons) in place
+# where they differ. A run cut off between recreating the container and
+# moving them in (a shutdown during the health check) leaves the new
+# release running with the old updater, and later runs, finding nothing to
+# update, would never finish the job. The compose files went in first.
+function Sync-Files($image) {
+    $stage = Extract $image
+    if (-not $stage) { Log "couldn't read the files out of the running release"; return }
+    $changed = @()
+    foreach ($f in Get-ChildItem -Force -File $stage) {
+        if ($f.Name -like 'compose*.yaml') { continue }
+        $dest = Join-Path $Dir $f.Name
+        if ((Test-Path $dest) -and (Get-FileHash $f.FullName).Hash -eq (Get-FileHash $dest).Hash) { continue }
+        Move-Item -Force $f.FullName $dest
+        $changed += $f.Name
+    }
+    Remove-Item -Recurse -Force $stage, .compose*.yaml.previous -ErrorAction SilentlyContinue
+    if ($changed) { Log "put the running release's files in place: $($changed -join ', ')" }
+}
+
 function Apply($target) {
     $previous = Kv-Get $EnvFile 'SCS_IMAGE'
     Log "applying $target (was $previous)"
@@ -211,6 +231,7 @@ function Check {
     $script:Available = Version-Of $latest
     if ($latest -eq (Kv-Get $EnvFile 'SCS_IMAGE')) {
         $script:Available = ''
+        Sync-Files $latest
         Write-Status 'up_to_date' 'Running the latest release.'
     } elseif ($latest -eq (Kv-Get $State 'BAD')) {
         Write-Status 'skipped' "Release $($script:Available) failed to start here earlier; waiting for a newer one."

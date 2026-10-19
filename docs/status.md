@@ -24,6 +24,11 @@ Last updated Oct 19, 2026.
   Existing installs get the login change with the next update (applied once
   Docker Desktop has been started by hand once) and the launcher change and
   the Windows task's lost one-minute delay only by rerunning the installer.
+- Cut-off updates finish themselves (Oct 19, 2026): on Windows the 0.0.4
+  update stopped after recreating the container (`.env` pinned the new
+  digest) and before moving the new updater in, so the old updater stayed
+  and every later run found nothing to do. An up-to-date run now puts back
+  any of the running release's non-compose files that differ.
 - Windows taskbar identity (Oct 19, 2026): the shortcuts and any existing
   taskbar pin carry the AppUserModelID Chromium stamps on the profile's
   windows, built with Chromium's 64-character truncation, so the Sissy
