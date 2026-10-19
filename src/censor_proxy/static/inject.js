@@ -4,7 +4,8 @@
 //
 // Video: every video is paused and covered. "Play censored" asks the proxy
 // for a censored copy and plays it in our own <video> laid over the original.
-// Videos whose source can't be found stay covered.
+// Videos whose source can't be found stay covered. Hover previews inside
+// links are covered by their poster instead, and let the pointer through.
 //
 // Images: an image still loading a moment after it comes into view (most
 // often waiting its turn in the censor) gets a placeholder until it arrives.
@@ -27,6 +28,7 @@
   });
   const VIDEO = "__VIDEO__" === "true";                  // video.enabled
   const START_MUTED = "__START_MUTED__" === "true";      // video.start_muted
+  const LINK_PREVIEWS = "__LINK_PREVIEWS__" === "true";  // video.link_previews
   const PLACEHOLDERS = "__PLACEHOLDERS__" === "true";    // images.placeholders
   const PLACEHOLDER_MS = Number("__PLACEHOLDER_MS__");   // images.placeholder_delay_ms
   const PLACEHOLDER_MIN_PX = Number("__PLACEHOLDER_MIN_PX__");  // images.placeholder_min_px
@@ -136,6 +138,20 @@
       video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
       .card.playing { padding: 0; }
       .card.playing > :not(video) { display: none !important; }
+      /* Link previews: the video's poster (an image, so censored by the
+         proxy) and a small mark; the pointer passes through to the page. */
+      .card > .mark { display: none; }
+      .card.preview { padding: 0; pointer-events: none; background: var(--censor-bg) center / cover no-repeat; }
+      .card.preview > :not(.mark) { display: none !important; }
+      .card.preview > .mark {
+        display: block; position: absolute; left: 8px; bottom: 8px; width: 24px; height: 24px;
+        padding: 5px; box-sizing: border-box; border-radius: 6px;
+        background: var(--censor-bg); color: var(--censor-accent);
+      }
+      .card.preview > .mark svg { width: 100%; height: auto; }
+      .card.preview:not(.poster) > .mark {
+        position: static; width: clamp(14px, 22cqmin, 40px); height: auto; padding: 0; background: none;
+      }
       /* Small players: the brand name goes first, then the extra copy; the
          button always stays. */
       @container (max-width: 380px) or (max-height: 230px) {
@@ -416,7 +432,7 @@
 
   function guard(video) {
     if (ours.has(video) || guarded.has(video)) return;
-    const info = describe(video);
+    const info = { ...describe(video), preview: LINK_PREVIEWS && inLink(video) };
     if (!reported.has(info.src)) {  // sites that recreate players would flood the log
       reported.add(info.src);
       report("guard", info);
@@ -442,11 +458,47 @@
       e.stopPropagation();
       start(video, state);
     });
-    card.append(brand, badge, msg, detail, button, bar);
-    const state = { card, host: makeHost(card), brand, badge, msg, detail, bar, button, player: null, jobId: null, frames: 0, container: null };
+    const mark = el("div", "mark");
+    mark.appendChild(icon("mark"));
+    card.append(mark, brand, badge, msg, detail, button, bar);
+    const state = { card, host: makeHost(card), brand, badge, msg, detail, bar, button, player: null, jobId: null,
+                    frames: 0, container: null, preview: false, poster: "" };
     show(state, "idle");
     guarded.set(video, state);
     startPositioning();
+  }
+
+  // A video inside a link is a preview of what the link opens (thumbnails
+  // that play a clip under the pointer): a click there follows the link, so
+  // no real player sits in one. Its card must not take the pointer, or the
+  // page sees the pointer leave the thumbnail, drops the preview, and adds
+  // it back when the card goes: a flicker (Pornhub, YouPorn).
+  function inLink(video) {
+    for (const node of around(video)) {
+      if (node.localName === "a" && node.hasAttribute("href")) return true;
+    }
+    return false;
+  }
+
+  // Switch a card between the full card and the preview card, and keep the
+  // preview's poster current. Only http(s) posters: those come through the
+  // proxy, censored like any image; a data: or blob: one might not have.
+  function previewMode(video, state) {
+    const preview = LINK_PREVIEWS && !state.player && inLink(video);
+    const poster = preview && httpUrl(video.getAttribute("poster")) || "";
+    const card = state.card;
+    if (preview !== state.preview) {
+      state.preview = preview;
+      card.classList.toggle("preview", preview);
+      state.host.style.setProperty("pointer-events", preview ? "none" : "auto", "important");
+    }
+    if (poster !== state.poster) {
+      state.poster = poster;
+      card.classList.toggle("poster", !!poster);
+      card.style.backgroundImage = poster ? `url(${JSON.stringify(poster)})` : "";
+    }
+    if (preview) card.style.borderRadius = getComputedStyle(video).borderRadius;
+    else card.style.removeProperty("border-radius");
   }
 
   function show(state, mode, why) {
@@ -561,6 +613,7 @@
       // and rebuild their markup while they load.
       const s = host.style;
       if (++state.frames % 30 === 1) {
+        previewMode(video, state);
         state.container = playerBox(video, r);
         const z = state.container ? String(stackAbove(state.container)) : "2147483647";
         if (z !== state.z) s.setProperty("z-index", state.z = z, "important");

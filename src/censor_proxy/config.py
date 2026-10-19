@@ -171,6 +171,7 @@ class VideoConfig:
     padding: float
     audio: bool
     start_muted: bool
+    link_previews: bool
     preset: str
     crf: int
     ready_seconds: float
