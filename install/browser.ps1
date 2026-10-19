@@ -12,12 +12,12 @@ untouched. Linux and macOS: install/browser.sh.
 
 Run from a normal PowerShell (winget asks for elevation when it needs it):
 
-  powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
+  powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
 
 Remove the shortcut, its profile and the update task (keeps Docker Desktop,
 Chromium and %USERPROFILE%\scs):
 
-  powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
+  powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
 
 Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE.
 #>

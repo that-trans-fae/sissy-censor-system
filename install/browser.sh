@@ -12,12 +12,12 @@
 #
 # Run as your normal user (not root); sudo is asked for where it is needed:
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 #
 # Remove the launcher, its profile and the update job (keeps Docker,
 # Chromium and ~/scs):
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | SCS_UNINSTALL=1 bash
+#   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
 #
 # Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR.
 set -euo pipefail

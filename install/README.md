@@ -8,8 +8,9 @@ system-wide changes: no system proxy, no CA in the system trust store, and
 your other browsers are untouched. No source code is downloaded: everything
 the install needs comes out of the image.
 
-Replace `OWNER` in the URLs below with the GitHub account that hosts the
-installers. The image comes from
+The scripts are served from
+[`that-trans-fae/sissy-censor-system`](https://github.com/that-trans-fae/sissy-censor-system)
+on GitHub. The image comes from
 [`thattransfae/scs`](https://hub.docker.com/r/thattransfae/scs) on Docker
 Hub (`SCS_IMAGE_REPO` points elsewhere).
 
@@ -39,13 +40,13 @@ also starts the proxy container if Docker is up.
 Linux and macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | bash
+curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 ```
 
 Windows, from a normal PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
 ```
 
 Where it lands:
@@ -125,11 +126,11 @@ Both scripts read these environment variables:
 Undo keeps Docker, Chromium and `~/scs`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | SCS_UNINSTALL=1 bash
+curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
 ```
 
 Rerunning the installer is safe: it installs the channel's current

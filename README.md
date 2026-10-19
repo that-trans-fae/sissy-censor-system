@@ -107,20 +107,19 @@ through the proxy. Your normal browsers, your operating system's network
 settings and your system certificate store are not touched. You can keep
 using your usual browser for everything else, and the two never mix.
 
-One command does the whole install. Replace `OWNER` with the GitHub
-account that hosts this project.
+One command does the whole install.
 
 Linux (Ubuntu, Debian, Fedora or Arch) and macOS, in a terminal as your
 normal user:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | bash
+curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 ```
 
 Windows 10 or 11, in a normal PowerShell window:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
 ```
 
 The script asks for your password (sudo) or an elevation prompt (winget)
@@ -151,11 +150,11 @@ To remove the browser, its profile and the update job (Docker, Chromium and
 the `~/scs` folder are kept):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | SCS_UNINSTALL=1 bash
+curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/OWNER/scs/main/install/browser.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
 ```
 
 [`install/README.md`](install/README.md) covers the environment variables
