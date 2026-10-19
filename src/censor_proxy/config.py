@@ -56,6 +56,7 @@ class ResourceLevel:
     description: str
     workers: int
     threads_per_worker: int
+    video_jobs: int | None  # video.max_concurrent_jobs; None leaves it as written
 
 
 @dataclass(frozen=True)
@@ -398,7 +399,9 @@ def _build(raw: dict[str, Any]) -> Config:
             levels.append(ResourceLevel(name=str(name), label=str(entry.get("label") or name),
                                         description=str(entry.get("description") or ""),
                                         workers=int(entry["workers"]),
-                                        threads_per_worker=int(entry["threads_per_worker"])))
+                                        threads_per_worker=int(entry["threads_per_worker"]),
+                                        video_jobs=(None if entry.get("video_jobs") is None
+                                                    else int(entry["video_jobs"]))))
         except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise ConfigError(f"model.resource_levels.{name}: needs workers and "
                               f"threads_per_worker ({e})") from e
@@ -408,8 +411,10 @@ def _build(raw: dict[str, Any]) -> Config:
         raise ConfigError(f"model.resources must be {CUSTOM_RESOURCES} or one of "
                           f"{[l.name for l in levels]}, got {resources!r}")
     if level:
-        # A level owns the two keys; config.yaml's values are kept but ignored.
+        # A level owns these keys; config.yaml's values are kept but ignored.
         m = {**m, "workers": level.workers, "threads_per_worker": level.threads_per_worker}
+        if level.video_jobs is not None:
+            raw = {**raw, "video": {**raw["video"], "max_concurrent_jobs": level.video_jobs}}
     sections = {
         "model": ModelConfig(**{**m, "available": tuple(available), "resources": resources,
                                 "resource_levels": tuple(levels)}),
@@ -485,8 +490,12 @@ def _build(raw: dict[str, Any]) -> Config:
 def _validate(cfg: Config) -> None:
     if cfg.model.workers < 1 or cfg.model.threads_per_worker < 1:
         raise ConfigError("model.workers and model.threads_per_worker must be >= 1")
-    if any(l.workers < 1 or l.threads_per_worker < 1 for l in cfg.model.resource_levels):
-        raise ConfigError("model.resource_levels: workers and threads_per_worker must be >= 1")
+    if any(l.workers < 1 or l.threads_per_worker < 1 or (l.video_jobs is not None and l.video_jobs < 1)
+           for l in cfg.model.resource_levels):
+        raise ConfigError("model.resource_levels: workers, threads_per_worker and video_jobs "
+                          "must be >= 1")
+    if cfg.video.max_concurrent_jobs < 1:
+        raise ConfigError("video.max_concurrent_jobs must be >= 1")
     if cfg.censor.style not in CENSOR_STYLES:
         raise ConfigError(f"censor.style must be one of {CENSOR_STYLES}, got {cfg.censor.style!r}")
     if cfg.logging.level not in LOG_LEVELS:

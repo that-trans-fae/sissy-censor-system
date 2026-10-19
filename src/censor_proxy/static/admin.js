@@ -214,7 +214,8 @@
       ["Status", s.ready ? "Ready" : "Starting"],
       ["Censoring level", s.preset_label || title(s.preset)],
       ["Image model", `${s.model}${s.tiling ? ", tiling" : ""}`],
-      ["Resources", `${s.resources_label}: ${plural(s.workers, "worker")}, ${plural(s.threads_per_worker, "thread")}`],
+      ["Resources", `${s.resources_label}: ${plural(s.workers, "worker")}, ${plural(s.threads_per_worker, "thread")}, ` +
+                    `${plural(s.video.max_concurrent_jobs, "video")} at once`],
       ["Video", s.video.enabled ? `on, ${s.video.model}` : "off"],
       ["Censor style", s.censor_style],
       ["On failure", s.fail_closed ? "censor the whole image" : "deliver unmodified"],
@@ -423,7 +424,8 @@
   const SKIP_SECTIONS = new Set(["whitelist"]);  // has its own tab
   // The level pickers and switches above the sections.
   const SKIP_KEYS = new Set(["detection.preset", "model.resources", "model.workers",
-                             "model.threads_per_worker", "updates.enabled", "video.start_muted"]);
+                             "model.threads_per_worker", "video.max_concurrent_jobs",
+                             "updates.enabled", "video.start_muted"]);
   // Pairs of keys shown as one model picker (choices from model.available).
   const MODEL_PICKERS = { model: ["path", "resolution"], video: ["model_path", "model_resolution"],
                           video_attribution: ["model_path", "model_resolution"] };
@@ -595,14 +597,18 @@
   }
 
   // The resource consumption switch: one choice per model.resource_levels
-  // entry, and custom, which takes workers and threads from the inputs below.
+  // entry, and custom, which takes workers, threads and video jobs from the
+  // inputs below.
   function renderResources(view) {
     const r = view.resources;
     // Custom's own numbers only once it's chosen: choosing it starts from the level.
     const options = [...r.options, {
-      name: CUSTOM, ...(r.active === CUSTOM && { workers: r.workers, threads_per_worker: r.threads_per_worker }),
-      description: "Set the workers and threads yourself. Starts from the level you had.",
+      name: CUSTOM, ...(r.active === CUSTOM && { workers: r.workers, threads_per_worker: r.threads_per_worker,
+                                                 video_jobs: r.video_jobs }),
+      description: "Set the workers, threads and video jobs yourself. Starts from the level you had.",
     }];
+    const numbers = (o) => [plural(o.workers, "worker"), plural(o.threads_per_worker, "thread"),
+                            ...(o.video_jobs ? [`${plural(o.video_jobs, "video")} at once`] : [])].join(", ");
     const choose = async (o) => {
       if (o.name === r.active) return;
       $("cfg-error").textContent = "";
@@ -618,7 +624,7 @@
       "aria-checked": o.name === r.active ? "true" : "false", disabled: !view.editable,
       onclick: () => choose(o),
     }, h("span", { class: "title", text: o.label || title(o.name) }),
-       o.workers ? h("span", { class: "desc", text: `${plural(o.workers, "worker")}, ${plural(o.threads_per_worker, "thread")}.` }) : null,
+       o.workers ? h("span", { class: "desc", text: `${numbers(o)}.` }) : null,
        o.description ? h("span", { class: "desc", text: o.description }) : null)));
 
     const custom = r.active === CUSTOM;
@@ -626,20 +632,22 @@
     if (!custom) return;
     const input = (value) => h("input", { type: "number", min: "1", step: "1", value: String(value),
                                           disabled: !view.editable });
-    const workers = input(r.workers), threads = input(r.threads_per_worker);
+    const workers = input(r.workers), threads = input(r.threads_per_worker), videos = input(r.video_jobs);
     const save = h("button", { type: "button", class: "primary", text: "Save", disabled: !view.editable,
       onclick: async () => {
         $("cfg-error").textContent = "";
         try {
           renderSettings(await saveSettings({ "model.workers": Number(workers.value),
-                                              "model.threads_per_worker": Number(threads.value) }));
+                                              "model.threads_per_worker": Number(threads.value),
+                                              "video.max_concurrent_jobs": Number(videos.value) }));
           toast("Resource consumption saved");
         } catch (err) {
           if (err.status !== 401) $("cfg-error").textContent = err.message;
         }
       } });
     $("resources-custom").replaceChildren(
-      h("label", {}, "Workers ", workers), h("label", {}, "Threads per worker ", threads), save);
+      h("label", {}, "Workers ", workers), h("label", {}, "Threads per worker ", threads),
+      h("label", {}, "Videos at once ", videos), save);
   }
 
   function renderLevels(view) {

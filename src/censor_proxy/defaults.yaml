@@ -9,30 +9,35 @@ model:
   path: null
   # Must match the model: 640 for 640m, 320 for 320n.
   resolution: 320
-  # Resource consumption: a name from `resource_levels`, which sets workers
-  # and threads_per_worker, or custom to use those two keys as written.
-  # Picked at the top of the admin panel's Settings tab.
+  # Resource consumption: a name from `resource_levels`, which sets workers,
+  # threads_per_worker and video.max_concurrent_jobs, or custom to use those
+  # keys as written. Picked at the top of the admin panel's Settings tab.
   resources: recommended
-  # Each level's workers and threads_per_worker, and a label and description
-  # for the panel. Sized for a 16-CPU Docker VM: throughput levels off around
-  # 4 workers and 8 threads, so Maximum mostly buys more images in flight at
-  # once. config.yaml can replace the whole mapping.
+  # Each level's workers and threads_per_worker, video_jobs (sets
+  # video.max_concurrent_jobs; a level without it leaves that key as
+  # written), and a label and description for the panel. Sized for a
+  # 16-CPU Docker VM: throughput levels off around 4 workers and 8 threads,
+  # so Maximum mostly buys more images in flight at once, and two videos.
+  # config.yaml can replace the whole mapping.
   resource_levels:
     minimal:
       label: Minimal
       description: Leaves most of the computer free. Image-heavy pages fill in slowly.
       workers: 2
       threads_per_worker: 4
+      video_jobs: 1
     recommended:
       label: Recommended
       description: Fast on most pages, with room left for the browser.
       workers: 4
       threads_per_worker: 8
+      video_jobs: 1
     maximum:
       label: Maximum
       description: As fast as this computer allows. Can slow other programs while pages load.
       workers: 8
       threads_per_worker: 16
+      video_jobs: 2
   # Concurrent inference workers, and onnxruntime threads per worker. Used
   # only when resources is custom; a level sets both otherwise.
   workers: 2
@@ -343,7 +348,8 @@ video:
   stall_seconds: 20
   # Longer videos are refused (they stay covered).
   max_duration_seconds: 1800
-  # Jobs beyond this wait in a queue ("Waiting for another video").
+  # Jobs beyond this wait in a queue ("Waiting for another video"). Set by
+  # model.resources unless that is custom.
   max_concurrent_jobs: 1
   # Any page can ask for jobs, so the queue is capped: beyond this many
   # waiting jobs, new requests are refused until one starts. 0 for no cap.

@@ -191,11 +191,13 @@ Tabs:
     because 640m can't keep up with video.
   - **Resource consumption** (`model.resources`): how many images are
     scanned at once (`model.workers`) and the onnxruntime threads they
-    share (`model.threads_per_worker`). Minimal is 2 and 4, Recommended
-    (the default) 4 and 8, Maximum 8 and 16; the levels live in
-    `model.resource_levels`. Custom takes the two numbers from its own
-    inputs, starting from the level you had. Applies at once (the model
-    reloads).
+    share (`model.threads_per_worker`), and how many videos are censored
+    at once (`video.max_concurrent_jobs`; the rest wait). Minimal is 2, 4
+    and 1 video, Recommended (the default) 4, 8 and 1, Maximum 8, 16 and
+    2; the levels live in `model.resource_levels`. Custom takes the three
+    numbers from its own inputs, starting from the level you had. Applies
+    at once (the model reloads; a waiting video starts if there is now
+    room).
   - **Censoring level** (`detection.preset`):
     - **Full**: no nudity of any kind, men's included.
     - **Cocks only**: only penises pass; men's buttocks and anus are

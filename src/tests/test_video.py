@@ -560,7 +560,7 @@ def test_paused_job_yields_its_slot_to_a_waiting_one(cfg, tmp_path, monkeypatch)
     paused = Job("p" * 24, "https://example.com/a.mp4", state="running",
                  last_active=time.time() - cfg.video.idle_seconds - 1)
     jobs._jobs[paused.id] = paused
-    jobs._slots.acquire()
+    assert jobs._take_slot()
     ran = threading.Event()
     monkeypatch.setattr("censor_proxy.video.censor_video", lambda *a: ran.set())
     waiting = Job("w" * 24, "https://example.com/b.mp4")
@@ -572,7 +572,7 @@ def test_paused_job_yields_its_slot_to_a_waiting_one(cfg, tmp_path, monkeypatch)
         waiting.touch(active=True)  # its page is polling, visible
         time.sleep(0.1)
     assert "paused" in paused.cancel_reason
-    jobs._slots.release()  # the paused job's pump stops and frees the slot
+    jobs._release_slot()  # the paused job's pump stops and frees the slot
     worker.join(5)
     assert ran.is_set() and waiting.state == "done"
 
@@ -582,7 +582,7 @@ def test_waiting_job_in_background_does_not_preempt(cfg, tmp_path):
     jobs = VideoJobs(cfg, FakeDetector())
     paused = Job("p" * 24, "https://example.com/a.mp4", state="running", last_active=0)
     jobs._jobs[paused.id] = paused
-    jobs._slots.acquire()
+    assert jobs._take_slot()
     hidden = Job("h" * 24, "https://example.com/b.mp4", last_active=0)
     worker = threading.Thread(target=jobs._wait_for_slot, args=(hidden,))
     worker.start()
@@ -590,6 +590,27 @@ def test_waiting_job_in_background_does_not_preempt(cfg, tmp_path):
     hidden.cancel("test over")
     worker.join(5)
     assert not paused.cancel_reason
+
+
+def test_job_limit_follows_the_config(cfg, tmp_path):
+    """Raising max_concurrent_jobs (a resource level switch) starts a waiting
+    job at once; lowering it lets running jobs finish but starts no more."""
+    one = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path), max_concurrent_jobs=1))
+    jobs = VideoJobs(one, FakeDetector())
+    assert jobs._take_slot()
+    waiting = Job("w" * 24, "https://example.com/b.mp4")
+    got = threading.Event()
+    worker = threading.Thread(target=lambda: jobs._wait_for_slot(waiting) and got.set())
+    worker.start()
+    assert not got.wait(0.7)
+    jobs.reconfigure(replace(one, video=replace(one.video, max_concurrent_jobs=2)))
+    assert got.wait(5)
+    worker.join(5)
+    jobs.reconfigure(one)
+    jobs._release_slot()
+    assert not jobs._take_slot()  # one still running, limit 1
+    jobs._release_slot()
+    assert jobs._take_slot()
 
 
 def test_server_status_activity_and_cancel(server):

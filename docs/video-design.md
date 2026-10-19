@@ -79,7 +79,8 @@ proxy
    - Finished outputs are cached by source URL and page origin so replays
      and seeks are instant; the cache is size-capped. Job ids are random,
      so a page can't derive another site's job from a video URL.
-   - Jobs run `video.max_concurrent_jobs` at a time; the rest queue, and
+   - Jobs run `video.max_concurrent_jobs` at a time (set by the resource
+     level: 2 on Maximum, 1 otherwise; read live); the rest queue, and
      the control says so. The script checks in every 2 s, saying whether
      the video is wanted now (being prepared or playing in a visible tab)
      or idle (paused, ended, background tab), and immediately on pause and

@@ -189,9 +189,9 @@ def test_failed_apply_leaves_file_alone(panel):
 
 def test_restart_only_settings_marked(panel):
     client, *_ = panel
-    _, view = client("POST", "/admin/api/config", {"set": {"video.max_concurrent_jobs": 3}})
-    key = next(k for s in view["sections"] if s["name"] == "video" for k in s["keys"]
-               if k["key"] == "max_concurrent_jobs")
+    _, view = client("POST", "/admin/api/config", {"set": {"admin.port": 8099}})
+    key = next(k for s in view["sections"] if s["name"] == "admin" for k in s["keys"]
+               if k["key"] == "port")
     assert key["restart"] and key["pending_restart"]
     assert all(k["key"] != "pin_hash" for s in view["sections"] for k in s["keys"])
 
@@ -387,33 +387,42 @@ def test_resource_levels_lock_workers_and_seed_custom(panel):
     _, view = client("GET", "/admin/api/config")
     r = view["resources"]
     assert r["active"] == "recommended"
-    assert [(o["name"], o["label"], o["workers"], o["threads_per_worker"]) for o in r["options"]] == [
-        ("minimal", "Minimal", 2, 4), ("recommended", "Recommended", 4, 8),
-        ("maximum", "Maximum", 8, 16)]
+    assert [(o["name"], o["label"], o["workers"], o["threads_per_worker"], o["video_jobs"])
+            for o in r["options"]] == [
+        ("minimal", "Minimal", 2, 4, 1), ("recommended", "Recommended", 4, 8, 1),
+        ("maximum", "Maximum", 8, 16, 2)]
     shown = {(s["name"], k["key"]) for s in view["sections"] for k in s["keys"]}
     assert ("model", "resource_levels") not in shown
+    resources = lambda: (app.cfg.model.workers, app.cfg.model.threads_per_worker,
+                         app.cfg.video.max_concurrent_jobs)
 
     r, view = client("POST", "/admin/api/config", {"set": {"model.resources": "maximum"}})
     assert r.status == 200 and view["resources"]["active"] == "maximum"
-    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (8, 16)
+    assert resources() == (8, 16, 2)
+    key = next(k for s in view["sections"] if s["name"] == "video" for k in s["keys"]
+               if k["key"] == "max_concurrent_jobs")
+    assert not key["restart"]
 
-    # A level owns workers and threads.
-    r, body = client("POST", "/admin/api/config", {"set": {"model.workers": 3}})
-    assert r.status == 400 and "Custom" in body["error"]
+    # A level owns workers, threads and video jobs.
+    for key in ("model.workers", "video.max_concurrent_jobs"):
+        r, body = client("POST", "/admin/api/config", {"set": {key: 3}})
+        assert r.status == 400 and "Custom" in body["error"]
 
     # Custom starts from the level you had, then takes your own values.
     r, view = client("POST", "/admin/api/config", {"set": {"model.resources": "custom"}})
-    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (8, 16)
-    assert (view["resources"]["workers"], view["resources"]["threads_per_worker"]) == (8, 16)
-    r, _ = client("POST", "/admin/api/config", {"set": {"model.workers": 3}})
-    assert r.status == 200 and app.cfg.model.workers == 3
+    assert resources() == (8, 16, 2)
+    assert (view["resources"]["workers"], view["resources"]["threads_per_worker"],
+            view["resources"]["video_jobs"]) == (8, 16, 2)
+    r, _ = client("POST", "/admin/api/config", {"set": {"model.workers": 3,
+                                                        "video.max_concurrent_jobs": 3}})
+    assert r.status == 200 and resources() == (3, 16, 3)
 
     # Back to a level: the custom values stay in the file but don't apply.
     client("POST", "/admin/api/config", {"set": {"model.resources": "minimal"}})
-    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (2, 4)
-    assert "workers: 3" in path.read_text()
+    assert resources() == (2, 4, 1)
+    assert "workers: 3" in path.read_text() and "max_concurrent_jobs: 3" in path.read_text()
     client("POST", "/admin/api/config", {"set": {"model.resources": "custom"}})
-    assert (app.cfg.model.workers, app.cfg.model.threads_per_worker) == (3, 16)
+    assert resources() == (3, 16, 3)
 
 
 def test_presets_list_what_they_censor(panel):

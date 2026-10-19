@@ -257,7 +257,10 @@ class VideoJobs:
         # One job per origin for the same reason (a cache hit would tell).
         self._ids: dict[tuple[str, str], str] = {}
         self._lock = threading.Lock()
-        self._slots = threading.Semaphore(vcfg.max_concurrent_jobs)
+        # Running jobs, up to video.max_concurrent_jobs as it is now: a
+        # lower limit lets running jobs finish and starts no more until under it.
+        self._running = 0
+        self._slot_freed = threading.Condition(self._lock)
         self._attempts = 0
         self._starts: dict[str, deque[float]] = {}  # origin -> recent start times
 
@@ -292,8 +295,8 @@ class VideoJobs:
             return sorted(self._jobs.values(), key=lambda j: j.created, reverse=True)
 
     def reconfigure(self, cfg: Config) -> None:
-        """Use a new config for later jobs. The cache directory and the number
-        of slots are fixed at startup."""
+        """Use a new config for later jobs. The cache directory is fixed at
+        startup."""
         with self._detector_lock:
             old, new = self.cfg, cfg
             if (old.model, old.video.model_path, old.video.model_resolution, old.video.tiling) != \
@@ -305,6 +308,8 @@ class VideoJobs:
                      new.video_attribution.model_resolution, new.video_attribution.tiling):
                 self._attribution_detector = None
             self.cfg = cfg
+        with self._lock:
+            self._slot_freed.notify_all()  # a higher limit starts waiting jobs now
 
     def active(self) -> int:
         with self._lock:
@@ -361,8 +366,8 @@ class VideoJobs:
         """Wait for a free slot, taking one from a running job whose video
         is paused or in a background tab. False if this job was cancelled
         or abandoned while it waited."""
-        v = self.cfg.video
-        while not self._slots.acquire(timeout=0.5):
+        while not self._take_slot():
+            v = self.cfg.video
             if job.stop_reason(v.abandon_seconds):
                 return False
             with self._lock:
@@ -372,6 +377,21 @@ class VideoJobs:
                 min(idle, key=lambda j: j.last_active).cancel(
                     "stopped: paused or in the background while another video waited")
         return True
+
+    def _take_slot(self) -> bool:
+        """Take a slot, waiting up to half a second for one to come free."""
+        with self._lock:
+            if self._running >= self.cfg.video.max_concurrent_jobs:
+                self._slot_freed.wait(timeout=0.5)
+            if self._running >= self.cfg.video.max_concurrent_jobs:
+                return False
+            self._running += 1
+            return True
+
+    def _release_slot(self) -> None:
+        with self._lock:
+            self._running -= 1
+            self._slot_freed.notify()
 
     def _run(self, job: Job) -> None:
         if not self._wait_for_slot(job):
@@ -390,7 +410,7 @@ class VideoJobs:
             except Exception as e:
                 self._fail(job, str(e) or type(e).__name__)
         finally:
-            self._slots.release()
+            self._release_slot()
 
     def _fail(self, job: Job, error: str) -> None:
         log.warning("video failed %s: %s", job.id, error)

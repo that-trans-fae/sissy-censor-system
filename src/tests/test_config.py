@@ -111,6 +111,7 @@ def test_presets_merge_by_name(make_config, tmp_path):
     "model: {resource_levels: {custom: {workers: 1, threads_per_worker: 1}}}\n",
     "model: {resource_levels: {tiny: {workers: 1}}}\n",
     "model: {resource_levels: {tiny: {workers: 0, threads_per_worker: 1}}}\n",
+    "model: {resource_levels: {tiny: {workers: 1, threads_per_worker: 1, video_jobs: 0}}}\n",
     "model: {resources: custom, workers: 0}\n",
 ])
 def test_bad_presets_and_models_rejected(make_config, text):
@@ -121,13 +122,29 @@ def test_bad_presets_and_models_rejected(make_config, text):
 def test_resource_levels(make_config):
     m = make_config("model: {workers: 1, threads_per_worker: 1}\n").model  # ignored under a level
     assert m.resources == "recommended" and m.resources_label == "Recommended"
-    assert [(l.name, l.workers, l.threads_per_worker) for l in m.resource_levels] == [
-        ("minimal", 2, 4), ("recommended", 4, 8), ("maximum", 8, 16)]
+    assert [(l.name, l.workers, l.threads_per_worker, l.video_jobs) for l in m.resource_levels] == [
+        ("minimal", 2, 4, 1), ("recommended", 4, 8, 1), ("maximum", 8, 16, 2)]
     assert (m.workers, m.threads_per_worker) == (4, 8)
     minimal = make_config("model: {resources: minimal}\n").model
     assert (minimal.workers, minimal.threads_per_worker) == (2, 4)
     custom = make_config("model: {resources: custom, workers: 3, threads_per_worker: 6}\n").model
     assert (custom.workers, custom.threads_per_worker, custom.resources_label) == (3, 6, "Custom")
+
+
+def test_resource_levels_set_video_jobs(make_config):
+    assert make_config("model: {resources: maximum}\n").video.max_concurrent_jobs == 2
+    # Under a level, config.yaml's value is ignored; custom uses it.
+    assert make_config("model: {resources: minimal}\nvideo: {max_concurrent_jobs: 3}\n") \
+        .video.max_concurrent_jobs == 1
+    assert make_config("model: {resources: custom}\nvideo: {max_concurrent_jobs: 3}\n") \
+        .video.max_concurrent_jobs == 3
+    # A level without video_jobs (one written before it existed) leaves it as written.
+    own = make_config("model:\n  resources: mine\n  resource_levels:\n"
+                      "    mine: {workers: 1, threads_per_worker: 1}\n"
+                      "video: {max_concurrent_jobs: 3}\n")
+    assert own.model.resource_levels[0].video_jobs is None and own.video.max_concurrent_jobs == 3
+    with pytest.raises(ConfigError):
+        make_config("model: {resources: custom}\nvideo: {max_concurrent_jobs: 0}\n")
 
 
 def test_model_names(make_config):

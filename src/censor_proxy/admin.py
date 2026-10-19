@@ -72,14 +72,16 @@ STATIC_FILES = {"admin.js": "text/javascript; charset=utf-8",
 CANCEL_PATH = re.compile(r"^jobs/([0-9a-f]{24})/cancel$")
 # Settings that are read once at startup.
 RESTART_KEYS = frozenset({"proxy.internal_port", "admin.enabled", "admin.bind", "admin.port",
-                          "video.cache_dir", "video.max_concurrent_jobs"})
+                          "video.cache_dir"})
 # Managed through their own endpoints, never shown or set as plain settings.
 HIDDEN_KEYS = frozenset({"admin.pin_hash"})
 # Settable, but edited in config.yaml rather than shown as fields: the panel
 # offers them as choices (the censoring level, the model list).
 NOT_SHOWN_KEYS = frozenset({"detection.presets", "model.available", "model.resource_levels"})
-# The keys a resource level sets (model.resource_levels).
-RESOURCE_KEYS = ("workers", "threads_per_worker")
+# The keys a resource level sets (model.resource_levels), each with its
+# field in a level.
+RESOURCE_KEYS = {"model.workers": "workers", "model.threads_per_worker": "threads_per_worker",
+                 "video.max_concurrent_jobs": "video_jobs"}
 NULLABLE_KEYS = frozenset({"logging.path", "detection.label_thresholds", "admin.attempts_log",
                            "video_attribution.model_path"})
 PIN = re.compile(r"^\d{4,12}$")
@@ -392,25 +394,29 @@ class UserConfigFile:
 
     def _check_resources(self, doc: CommentedMap, before: tuple[str, dict],
                          changed: list[str], defaults: dict) -> None:
-        """Workers and threads are the level's while one is chosen. Switching
-        to custom with neither saved starts from the previous level."""
+        """Workers, threads and video jobs are the level's while one is
+        chosen (video jobs only if the level sets them). Switching to custom
+        with none of them saved starts from the previous level."""
         name, levels = self._resources(doc)
-        keys = [k for k in changed if k in {f"model.{r}" for r in RESOURCE_KEYS}]
+        level = levels.get(name) or {}
         if name != config.CUSTOM_RESOURCES:
-            if keys:
-                label = (levels.get(name) or {}).get("label") or name
-                raise AdminError(400, f"Workers and threads come from the {label} resource "
-                                      "level. Choose Custom to set them yourself.")
+            if any(k in RESOURCE_KEYS and level.get(RESOURCE_KEYS[k]) is not None for k in changed):
+                raise AdminError(400, f"Workers, threads and video jobs come from the "
+                                      f"{level.get('label') or name} resource level. Choose "
+                                      "Custom to set them yourself.")
             return
         old, old_levels = before
-        saved = doc.get("model")
-        if (old == config.CUSTOM_RESOURCES or not isinstance(saved, dict)
-                or any(k in saved for k in RESOURCE_KEYS)):
+        keys = [k.split(".") for k in RESOURCE_KEYS]
+        if old == config.CUSTOM_RESOURCES or any(isinstance(doc.get(s), dict) and k in doc[s]
+                                                 for s, k in keys):
             return
-        for key in RESOURCE_KEYS:
-            value = (old_levels.get(old) or {}).get(key)
-            if f"model.{key}" not in keys and value is not None and value != defaults["model"][key]:
-                saved[key] = value
+        for section, key in keys:
+            value = (old_levels.get(old) or {}).get(RESOURCE_KEYS[f"{section}.{key}"])
+            if f"{section}.{key}" not in changed and value is not None \
+                    and value != defaults[section][key]:
+                if not isinstance(doc.get(section), dict):
+                    doc[section] = CommentedMap()
+                doc[section][key] = value
 
     def write(self, doc: CommentedMap) -> None:
         buf = io.StringIO()
@@ -635,9 +641,10 @@ class AdminServer:
                 "resources": {"active": str(current["model"]["resources"]),
                               "workers": current["model"]["workers"],
                               "threads_per_worker": current["model"]["threads_per_worker"],
+                              "video_jobs": current["video"]["max_concurrent_jobs"],
                               "options": [{"name": n, "label": (l or {}).get("label") or "",
                                            "description": (l or {}).get("description") or "",
-                                           **{k: (l or {}).get(k) for k in RESOURCE_KEYS}}
+                                           **{f: (l or {}).get(f) for f in RESOURCE_KEYS.values()}}
                                           for n, l in levels.items()]}}
 
 
