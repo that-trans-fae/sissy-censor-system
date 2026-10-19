@@ -226,3 +226,9 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
 - `docker ps` truncates commands, so grepping its output for a script name
   silently matches nothing; use `--no-trunc` (or `--filter`) before killing
   a background container.
+- Google challenges a Chromium that reaches it over TCP instead of QUIC
+  with a CAPTCHA on every search, and an HTTP proxy can't carry QUIC; a
+  bare CONNECT tunnel gets the same, so mitmproxy's TLS is not the trigger
+  and no proxy config can fix it. The launchers bypass the proxy for
+  `www.google.com` and resolve it to `forcesafesearch.google.com`
+  (SafeSearch locked). Don't whitelist Google in the proxy for this.

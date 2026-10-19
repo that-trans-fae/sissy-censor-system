@@ -12,6 +12,11 @@ Last updated Oct 19, 2026.
 - `censor.py` addon: Content-Type routing, the whitelist (built-in hosts plus
   your domains, never intercepted), size floor,
   `censor.local/health`, fail-closed on errors and timeouts
+- Google search around the proxy (Oct 19, 2026): Google challenges a
+  Chromium that can't use HTTP/3 with a CAPTCHA on every search, and an HTTP
+  proxy can't carry HTTP/3, so the launchers bypass the proxy for
+  `www.google.com` and resolve it to Google's SafeSearch-locking address;
+  see `decisions.md`
 - `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
   sampling and a content-hash cache
 - Female-only selection rule with context thresholds (see `decisions.md`)

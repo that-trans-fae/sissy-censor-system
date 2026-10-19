@@ -267,6 +267,8 @@ through the proxy and are censored.
 - If a site you need breaks, or is one the proxy should never look inside
   (your bank, a health portal, work sign-in), add it on the **Whitelist**
   tab. Whitelisted sites are not intercepted at all.
+- Google search runs with SafeSearch locked on (Google's settings page says
+  someone else controls it). That is the launcher's doing, see step 5 above.
 - If you forget whether something was blurred, the **Detections** tab lists
   recent scans by host, label and score. No images are shown.
 - Set a **PIN** on the panel if you don't want settings changed casually.

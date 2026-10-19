@@ -43,6 +43,15 @@ BROWSER_NAME="Sissy Browser"
 BROWSER_ID=sissy-browser
 PROXY_HOST=127.0.0.1
 PROXY_PORT=8080
+# Google search goes around the proxy. Google answers a Chromium that reaches
+# it over TCP instead of QUIC (HTTP/3) with a CAPTCHA on every search, and an
+# HTTP proxy can't carry QUIC (a bare CONNECT tunnel gets the same CAPTCHA;
+# mitmproxy isn't the trigger). The browser connects directly and resolves
+# the host to Google's SafeSearch-locking address itself, so results are
+# filtered at Google's end; Image Search thumbnails still load through the
+# proxy and are censored. See docs/decisions.md.
+PROXY_BYPASS=www.google.com
+RESOLVER_RULES="MAP www.google.com forcesafesearch.google.com"
 CA_PEM="$SCS_DIR/mitmproxy/mitmproxy-ca-cert.pem"
 ICON_SVG="$SCS_DIR/browser-icon.svg"
 UPDATE_UNIT=scs-update
@@ -442,6 +451,8 @@ fi
 exec "\$CHROMIUM" \\
   --user-data-dir="\$PROFILE" "\$FEATURES" \\
   --proxy-server="$PROXY_HOST:$PROXY_PORT" \\
+  --proxy-bypass-list="$PROXY_BYPASS" \\
+  --host-resolver-rules="$RESOLVER_RULES" \\
   --class=SissyBrowser \\
   --no-first-run --no-default-browser-check \\
   "\$@"
@@ -490,7 +501,7 @@ install_launcher_linux() {
   # (unless-stopped) and init_profile has trusted the CA.
   local exec="$bin"
   case $CHROMIUM in
-    /snap/*) exec="$CHROMIUM \"--user-data-dir=$(profile_dir)\" --proxy-server=$PROXY_HOST:$PROXY_PORT --class=SissyBrowser --no-first-run --no-default-browser-check" ;;
+    /snap/*) exec="$CHROMIUM \"--user-data-dir=$(profile_dir)\" --proxy-server=$PROXY_HOST:$PROXY_PORT --proxy-bypass-list=$PROXY_BYPASS \"--host-resolver-rules=$RESOLVER_RULES\" --class=SissyBrowser --no-first-run --no-default-browser-check" ;;
   esac
   # The icon is given by path: a stale icon-theme.cache in ~/.local/share/icons
   # otherwise hides a freshly added icon name from GNOME.
