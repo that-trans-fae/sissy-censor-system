@@ -160,6 +160,7 @@ class VideoConfig:
     max_fps: float
     padding: float
     audio: bool
+    start_muted: bool
     preset: str
     crf: int
     ready_seconds: float

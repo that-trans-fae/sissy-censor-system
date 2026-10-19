@@ -315,6 +315,9 @@ video:
   padding: 0.25
   # Keep the original audio (re-encoded to AAC). false outputs silent video.
   audio: true
+  # Start the censored copy muted; its controls unmute it. false takes the
+  # muted state of the page's own video.
+  start_muted: true
   # x264 settings for the censored copy.
   preset: veryfast
   crf: 23

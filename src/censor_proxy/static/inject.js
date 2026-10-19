@@ -26,6 +26,7 @@
     try { return [new RegExp(p, "i")]; } catch (_) { return []; }
   });
   const VIDEO = "__VIDEO__" === "true";                  // video.enabled
+  const START_MUTED = "__START_MUTED__" === "true";      // video.start_muted
   const PLACEHOLDERS = "__PLACEHOLDERS__" === "true";    // images.placeholders
   const PLACEHOLDER_MS = Number("__PLACEHOLDER_MS__");   // images.placeholder_delay_ms
   const PLACEHOLDER_MIN_PX = Number("__PLACEHOLDER_MIN_PX__");  // images.placeholder_min_px
@@ -960,7 +961,7 @@
     ours.add(player);
     player.controls = true;
     player.playsInline = true;
-    player.muted = video.muted;
+    player.muted = START_MUTED || video.muted;
     player.addEventListener("error", () => {
       report("player-error", { code: player.error && player.error.code, id: job.id });
       stop();

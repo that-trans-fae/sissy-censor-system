@@ -63,6 +63,9 @@ Last updated Oct 19, 2026.
   curl. Then: random per-origin job ids, the debug beacon gated on origin,
   and the service running as an unprivileged user with the confdir at
   `/mitmproxy` (needs `docker compose up -d --build`)
+- Censored videos start muted (`video.start_muted`, on by default, a
+  toggle in the admin panel's Video settings). Unit-tested only, not yet
+  checked in a browser
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, whitelist (built-in hosts, YouTube
   included, plus your own domains), censoring levels (Full, Cocks only, Only Women, Permissive, custom; any number of
