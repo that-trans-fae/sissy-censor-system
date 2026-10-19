@@ -107,10 +107,27 @@ def test_presets_merge_by_name(make_config, tmp_path):
     "detection: {presets: {custom: {settings: {}}}}\n",
     "detection: {presets: {permissive: {settings: {preset: full}}}}\n",
     "model: {available: [{path: /x.onnx}]}\n",
+    "model: {resources: turbo}\n",
+    "model: {resource_levels: {custom: {workers: 1, threads_per_worker: 1}}}\n",
+    "model: {resource_levels: {tiny: {workers: 1}}}\n",
+    "model: {resource_levels: {tiny: {workers: 0, threads_per_worker: 1}}}\n",
+    "model: {resources: custom, workers: 0}\n",
 ])
 def test_bad_presets_and_models_rejected(make_config, text):
     with pytest.raises(ConfigError):
         make_config(text)
+
+
+def test_resource_levels(make_config):
+    m = make_config("model: {workers: 1, threads_per_worker: 1}\n").model  # ignored under a level
+    assert m.resources == "recommended" and m.resources_label == "Recommended"
+    assert [(l.name, l.workers, l.threads_per_worker) for l in m.resource_levels] == [
+        ("minimal", 2, 4), ("recommended", 4, 8), ("maximum", 8, 16)]
+    assert (m.workers, m.threads_per_worker) == (4, 8)
+    minimal = make_config("model: {resources: minimal}\n").model
+    assert (minimal.workers, minimal.threads_per_worker) == (2, 4)
+    custom = make_config("model: {resources: custom, workers: 3, threads_per_worker: 6}\n").model
+    assert (custom.workers, custom.threads_per_worker, custom.resources_label) == (3, 6, "Custom")
 
 
 def test_model_names(make_config):

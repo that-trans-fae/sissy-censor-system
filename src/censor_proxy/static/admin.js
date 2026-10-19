@@ -6,6 +6,8 @@
 
   const $ = (id) => document.getElementById(id);
 
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
@@ -212,6 +214,7 @@
       ["Status", s.ready ? "Ready" : "Starting"],
       ["Censoring level", s.preset_label || title(s.preset)],
       ["Image model", `${s.model}${s.tiling ? ", tiling" : ""}`],
+      ["Resources", `${s.resources_label}: ${plural(s.workers, "worker")}, ${plural(s.threads_per_worker, "thread")}`],
       ["Video", s.video.enabled ? `on, ${s.video.model}` : "off"],
       ["Censor style", s.censor_style],
       ["On failure", s.fail_closed ? "censor the whole image" : "deliver unmodified"],
@@ -418,7 +421,9 @@
   // ---- settings ---------------------------------------------------------
 
   const SKIP_SECTIONS = new Set(["whitelist"]);  // has its own tab
-  const SKIP_KEYS = new Set(["detection.preset"]);  // the level picker above the sections
+  // The level pickers above the sections.
+  const SKIP_KEYS = new Set(["detection.preset", "model.resources", "model.workers",
+                             "model.threads_per_worker"]);
   // Pairs of keys shown as one model picker (choices from model.available).
   const MODEL_PICKERS = { model: ["path", "resolution"], video: ["model_path", "model_resolution"],
                           video_attribution: ["model_path", "model_resolution"] };
@@ -506,6 +511,7 @@
     if (view.error) $("cfg-error").textContent = view.error;
     $("cfg-reload").disabled = !view.path;
     renderSpeeds(view);
+    renderResources(view);
     renderLevels(view);
     // Every individual setting is shown only in custom mode.
     const custom = view.preset.active === CUSTOM;
@@ -533,6 +539,54 @@
       },
     }, h("span", { class: "title", text: m.label }),
        h("span", { class: "desc", text: `${m.name}. ${m.description}${m.installed ? "" : " Not installed."}` }))));
+  }
+
+  // The resource consumption switch: one choice per model.resource_levels
+  // entry, and custom, which takes workers and threads from the inputs below.
+  function renderResources(view) {
+    const r = view.resources;
+    // Custom's own numbers only once it's chosen: choosing it starts from the level.
+    const options = [...r.options, {
+      name: CUSTOM, ...(r.active === CUSTOM && { workers: r.workers, threads_per_worker: r.threads_per_worker }),
+      description: "Set the workers and threads yourself. Starts from the level you had.",
+    }];
+    const choose = async (o) => {
+      if (o.name === r.active) return;
+      $("cfg-error").textContent = "";
+      try {
+        renderSettings(await saveSettings({ "model.resources": o.name }));
+        toast(`Resource consumption: ${o.label || title(o.name)}`);
+      } catch (err) {
+        if (err.status !== 401) $("cfg-error").textContent = err.message;
+      }
+    };
+    $("resources").replaceChildren(...options.map((o) => h("button", {
+      type: "button", class: "level" + (o.name === r.active ? " active" : ""), role: "radio",
+      "aria-checked": o.name === r.active ? "true" : "false", disabled: !view.editable,
+      onclick: () => choose(o),
+    }, h("span", { class: "title", text: o.label || title(o.name) }),
+       o.workers ? h("span", { class: "desc", text: `${plural(o.workers, "worker")}, ${plural(o.threads_per_worker, "thread")}.` }) : null,
+       o.description ? h("span", { class: "desc", text: o.description }) : null)));
+
+    const custom = r.active === CUSTOM;
+    $("resources-custom").hidden = !custom;
+    if (!custom) return;
+    const input = (value) => h("input", { type: "number", min: "1", step: "1", value: String(value),
+                                          disabled: !view.editable });
+    const workers = input(r.workers), threads = input(r.threads_per_worker);
+    const save = h("button", { type: "button", class: "primary", text: "Save", disabled: !view.editable,
+      onclick: async () => {
+        $("cfg-error").textContent = "";
+        try {
+          renderSettings(await saveSettings({ "model.workers": Number(workers.value),
+                                              "model.threads_per_worker": Number(threads.value) }));
+          toast("Resource consumption saved");
+        } catch (err) {
+          if (err.status !== 401) $("cfg-error").textContent = err.message;
+        }
+      } });
+    $("resources-custom").replaceChildren(
+      h("label", {}, "Workers ", workers), h("label", {}, "Threads per worker ", threads), save);
   }
 
   function renderLevels(view) {

@@ -67,8 +67,9 @@ class CensorAddon:
         if self.cfg.admin.enabled:
             self.admin = AdminServer(self.cfg, self, UserConfigFile(config_path()))
             self.admin.start()
-        log.info("censor proxy ready: model=%s style=%s", self.cfg.model.path or "320n (bundled)",
-                 self.cfg.censor.style)
+        log.info("censor proxy ready: model=%s style=%s resources=%s (%d workers, %d threads)",
+                 self.cfg.model.path or "320n (bundled)", self.cfg.censor.style,
+                 self.cfg.model.resources, self.cfg.model.workers, self.cfg.model.threads_per_worker)
 
     def done(self):
         if self.pool:
@@ -95,6 +96,10 @@ class CensorAddon:
             "preset": cfg.detection.preset,
             "preset_label": cfg.detection.preset_label,
             "resolution": cfg.model.resolution,
+            "resources": cfg.model.resources,
+            "resources_label": cfg.model.resources_label,
+            "workers": cfg.model.workers,
+            "threads_per_worker": cfg.model.threads_per_worker,
             "tiling": cfg.model.tiling,
             "cache_entries": self.censor.cached() if self.censor else 0,
             "censor_style": cfg.censor.style,

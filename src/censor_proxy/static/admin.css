@@ -216,6 +216,9 @@ details.section .count { color: var(--muted); font-weight: 400; font-size: .85re
 .level .censors { margin: 0; padding-left: 1.2rem; font-size: .9rem; }
 .level.active { border-color: var(--accent); background: var(--accent-soft); }
 .level.active .title::before { border-color: var(--accent); background: radial-gradient(var(--accent) 40%, transparent 46%); }
+.levels + .row { margin-top: .75rem; }
+.levels + .row label { display: flex; align-items: center; gap: .5rem; }
+.levels + .row input[type="number"] { width: 5.5rem; }
 .alert { border-color: var(--danger); }
 .alert-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 .alert-head h2 { color: var(--danger); margin: 0; }
