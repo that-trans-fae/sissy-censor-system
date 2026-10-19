@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # Sissy Censor System updater for Linux and macOS (Windows: scs-update.ps1).
 #
-# Lives in the install folder (~/scs) and runs hourly from the systemd user
-# timer or launchd agent the installer adds. Each run:
+# Lives in the install folder (~/scs) and runs once each time you log in
+# after the computer starts, from the systemd user timer or launchd agent
+# the installer adds. The run:
 #
-#   1. reads updates.* from config/config.yaml, through the container
+#   1. waits for Docker and the proxy container to come up (Docker Desktop
+#      starts at login too)
+#   2. reads updates.* from config/config.yaml, through the container
 #      (censor_proxy/updates.py); updates.enabled false stops here
-#   2. at most every updates.check_hours, pulls SCS_CHANNEL from .env
-#      (the Docker Hub tag followed, such as thattransfae/scs:latest)
-#   3. if that is a new image, and the Sissy Browser is closed (or
-#      updates.wait_for_browser is false), puts the image's compose.yaml in
-#      place, pins SCS_IMAGE in .env to the new digest and recreates the
-#      container
-#   4. keeps it once the container reports healthy; otherwise puts the old
+#   3. pulls SCS_CHANNEL from .env (the Docker Hub tag followed, such as
+#      thattransfae/scs:latest), retrying while the network comes up
+#   4. if that is a new image, waits until the Sissy Browser is closed
+#      (unless updates.wait_for_browser is false), then puts the image's
+#      compose.yaml in place, pins SCS_IMAGE in .env to the new digest and
+#      recreates the container
+#   5. keeps it once the container reports healthy; otherwise puts the old
 #      compose.yaml and image back and skips that release from then on
 #
 # The result goes to logs/update.json, which the admin panel shows, and a
@@ -20,9 +23,9 @@
 # logs/, mitmproxy/) is treated as untrusted: nothing read from there or
 # from the container is evaluated, and nothing in logs/ is written through.
 #
-#   ./scs-update          what the timer runs
-#   ./scs-update --now    check now and apply at once, even with updates off
-#                         or the browser open
+#   ./scs-update          what runs at startup
+#   ./scs-update --now    check and apply at once, even with updates off or
+#                         the browser open
 set -uo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd -P) || exit 1
@@ -46,6 +49,12 @@ STATE=.update-state
 # Longest wait for a new container to report healthy (its HEALTHCHECK
 # start period is 180 s).
 HEALTH_TIMEOUT=300
+# At startup: how long to wait for Docker and the proxy, how many times to
+# try the download (a minute apart), and how often to look whether the
+# browser has closed. The SCS_UPDATE_* overrides are for the tests.
+STARTUP_WAIT=${SCS_UPDATE_STARTUP_WAIT:-900}
+PULL_TRIES=${SCS_UPDATE_PULL_TRIES:-10}
+POLL=${SCS_UPDATE_POLL:-60}
 
 log() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>update.log
@@ -105,9 +114,17 @@ version_of() {
 
 container() { docker compose ps -aq "$SERVICE" 2>/dev/null | head -n 1; }
 
+# Each image in use (running, being installed, or skipped as bad) keeps a
+# local tag named after its digest. Without one, Docker's containerd image
+# store forgets repo@sha256:... as soon as the channel tag moves on, and a
+# rollback or the launcher's `docker compose up` would download it again.
+keep_tag() { printf '%s:sha256-%s' "${1%@sha256:*}" "${1##*@sha256:}"; }
+keep() { [ -z "$1" ] || docker tag "$1" "$(keep_tag "$1")" >/dev/null 2>&1; }
+unkeep() { [ -z "$1" ] || docker image rm "$(keep_tag "$1")" >/dev/null 2>&1; }
+
 # updates.* through the container: exec into the running one, else a
 # throwaway. Lines are matched against fixed patterns, never evaluated.
-ENABLED=1 CHECK_SECONDS=86400 WAIT_FOR_BROWSER=1
+ENABLED=1 WAIT_FOR_BROWSER=1
 read_policy() {
   local out line
   out=$(docker compose exec -T "$SERVICE" python -m censor_proxy.updates policy 2>/dev/null) \
@@ -119,11 +136,6 @@ read_policy() {
       enabled=1) ENABLED=1 ;;
       wait_for_browser=0) WAIT_FOR_BROWSER=0 ;;
       wait_for_browser=1) WAIT_FOR_BROWSER=1 ;;
-      check_hours=*)
-        if [[ ${line#check_hours=} =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-          CHECK_SECONDS=$(awk -v h="${line#check_hours=}" 'BEGIN { printf "%d", h * 3600 }')
-        fi
-        ;;
     esac
   done <<<"$out"
 }
@@ -186,11 +198,10 @@ apply() {
     done
     chmod +x scs-update
     rm -rf "$stage" .compose.yaml.previous
-    kv_set "$STATE" PENDING ""
-    if [ -n "$previous" ] && [ "$previous" != "$target" ]; then docker image rm "$previous" >/dev/null 2>&1; fi
+    [ "$previous" = "$target" ] || unkeep "$previous"
     local bad
     bad=$(kv_get "$STATE" BAD)
-    if [ -n "$bad" ] && [ "$bad" != "$target" ]; then docker image rm "$bad" >/dev/null 2>&1; fi
+    [ "$bad" = "$target" ] || unkeep "$bad"
     kv_set "$STATE" BAD ""
     status updated "Updated to $AVAILABLE."
     return 0
@@ -201,62 +212,80 @@ apply() {
   kv_set .env SCS_IMAGE "$previous"
   docker compose up -d >>update.log 2>&1
   rm -rf "$stage"
-  kv_set "$STATE" PENDING ""
   kv_set "$STATE" BAD "$target"
-  # The bad image stays, so a later check sees it is the same release
+  # The bad image stays kept, so a later check sees it is the same release
   # without downloading it again.
   status failed "Release $AVAILABLE didn't start, so the proxy is back on $(version_of "$previous"). It will be skipped until a newer one is out; details in $DIR/update.log."
   return 1
 }
 
-# Pulls the channel; sets PENDING if it is a release not yet running.
+# The proxy container's state: running, restarting, exited... or empty.
+proxy_state() { docker inspect -f '{{.State.Status}}' "$(container)" 2>/dev/null; }
+
+# Pulls the channel, retrying while the network comes up; sets TARGET if it
+# is a release not yet running.
+TARGET=""
 check() {
-  local channel repo latest current bad
+  local channel repo latest current bad try=1
   channel=$(kv_get .env SCS_CHANNEL)
   [ -n "$channel" ] || { status error "SCS_CHANNEL isn't set in $DIR/.env."; return 1; }
   repo=${channel%:*}
-  if ! docker pull -q "$channel" >>update.log 2>&1; then
-    status error "Couldn't download $channel (offline, or Docker Hub unreachable)."
-    return 1
-  fi
-  kv_set "$STATE" LAST_CHECK "$(date +%s)"
+  until docker pull -q "$channel" >>update.log 2>&1; do
+    if [ "$try" -ge "$PULL_TRIES" ]; then
+      status error "Couldn't download $channel (offline, or Docker Hub unreachable); trying again at the next startup."
+      return 1
+    fi
+    try=$((try + 1))
+    sleep "$POLL"
+  done
   latest=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$channel" 2>/dev/null \
            | awk -v p="$repo@sha256:" 'index($0, p) == 1 { print; exit }')
   [ -n "$latest" ] || { status error "Downloaded $channel but found no digest for it."; return 1; }
+  keep "$latest"
   AVAILABLE=$(version_of "$latest")
   current=$(kv_get .env SCS_IMAGE)
   bad=$(kv_get "$STATE" BAD)
   if [ "$latest" = "$current" ]; then
-    kv_set "$STATE" PENDING ""
     AVAILABLE=""
     status up_to_date "Running the latest release."
   elif [ "$latest" = "$bad" ]; then
-    kv_set "$STATE" PENDING ""
     status skipped "Release $AVAILABLE failed to start here earlier; waiting for a newer one."
   else
-    kv_set "$STATE" PENDING "$latest"
+    TARGET=$latest
   fi
 }
 
 main() {
-  # One run at a time; a lock left by a crash expires after two hours.
-  if [ -d .update.lock ] && [ -n "$(find .update.lock -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
-    rmdir .update.lock 2>/dev/null
+  # One run at a time. The lock holds the run's pid, so one left by a run
+  # cut off at shutdown is taken over.
+  local holder
+  if ! mkdir .update.lock 2>/dev/null; then
+    holder=$(cat .update.lock/pid 2>/dev/null)
+    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+      [ ! -t 1 ] || echo "scs-update is already running (pid $holder), maybe waiting for the Sissy Browser to close"
+      exit 0
+    fi
   fi
-  mkdir .update.lock 2>/dev/null || { [ ! -t 1 ] || echo "another scs-update is running"; exit 0; }
-  trap 'rmdir "$DIR/.update.lock" 2>/dev/null; rm -rf "$DIR"/.stage.* "$DIR"/.kv.*' EXIT
+  echo $$ >.update.lock/pid
+  trap 'rm -rf "$DIR/.update.lock" "$DIR"/.stage.* "$DIR"/.kv.*' EXIT
   mkdir -p logs
 
-  if ! docker info >/dev/null 2>&1; then
-    status error "Docker isn't running or can't be reached."
-    exit 1
-  fi
-  local cid st
-  cid=$(container)
-  st=$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null)
+  # Docker (Docker Desktop starts at login too) and the proxy, which Docker
+  # restarts shortly after it is up. A proxy still stopped after two
+  # minutes was stopped by you, and is left alone.
+  local waited=0 st
+  until docker info >/dev/null 2>&1 && st=$(proxy_state) \
+        && case "$st" in running | restarting) true ;; "") false ;; *) [ "$waited" -ge 120 ] ;; esac; do
+    if [ "$waited" -ge "$STARTUP_WAIT" ]; then
+      status error "Docker or the proxy didn't start within $((STARTUP_WAIT / 60)) minutes; checking again at the next startup."
+      exit 1
+    fi
+    sleep 10
+    waited=$((waited + 10))
+  done
   case "$st" in
     running | restarting) ;;
-    *) [ "$FORCE" = 1 ] || { log "the proxy isn't running (${st:-no container}); nothing to do"; exit 0; } ;;
+    *) [ "$FORCE" = 1 ] || { log "the proxy isn't running ($st); nothing to do"; exit 0; } ;;
   esac
 
   read_policy
@@ -264,21 +293,20 @@ main() {
     status disabled "Automatic updates are off."
     exit 0
   fi
+  check || exit 1
+  [ -n "$TARGET" ] || exit 0
 
-  local last now pending
-  last=$(kv_get "$STATE" LAST_CHECK)
-  now=$(date +%s)
-  if [ "$FORCE" = 1 ] || ! [[ $last =~ ^[0-9]+$ ]] || [ $((now - last)) -ge "$CHECK_SECONDS" ]; then
-    check || exit 1
-  fi
-  pending=$(kv_get "$STATE" PENDING)
-  [ -n "$pending" ] || exit 0
-  AVAILABLE=$(version_of "$pending")
   if [ "$FORCE" = 0 ] && [ "$WAIT_FOR_BROWSER" = 1 ] && browser_open; then
     status pending "Release $AVAILABLE is downloaded and switches in once the Sissy Browser is closed."
-    exit 0
+    while browser_open; do sleep "$POLL"; done
+    # Updates may have been turned off on the panel meanwhile.
+    read_policy
+    if [ "$ENABLED" = 0 ]; then
+      status disabled "Automatic updates are off; release $AVAILABLE wasn't installed."
+      exit 0
+    fi
   fi
-  apply "$pending"
+  apply "$TARGET"
 }
 
 main

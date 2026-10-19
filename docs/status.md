@@ -98,8 +98,8 @@ Last updated Oct 19, 2026.
 
 - Distribution and automatic updates (Oct 19, 2026): the installers pull
   the image from Docker Hub and copy its `dist/` files out (no clone, no
-  build), and an hourly host job (`scs-update`) installs new releases while
-  the Sissy Browser is closed, keeps them once the image's health check
+  build), and a host job (`scs-update`) checks once at each startup and
+  installs a new release once the Sissy Browser is closed, keeps them once the image's health check
   passes, and rolls back and skips them otherwise. The result and an on/off
   switch are on the panel's Overview; `tools/release.sh` publishes amd64
   and arm64. Verified on Linux against a local registry with three

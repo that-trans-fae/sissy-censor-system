@@ -2,8 +2,8 @@
 # Sissy Censor System: dedicated browser installer for Linux and macOS.
 #
 # Installs Docker (Docker Engine on Linux, Docker Desktop on macOS), pulls
-# the proxy image from Docker Hub and starts it from ~/scs, adds an hourly
-# job that keeps it updated (scs-update, from the image), installs Chromium
+# the proxy image from Docker Hub and starts it from ~/scs, adds a job that
+# checks for updates at each startup (scs-update, from the image), installs Chromium
 # and adds a "Sissy Browser" launcher: a separate Chromium profile that
 # always goes through the proxy and trusts its CA in the profile's own
 # certificate store. Nothing system-wide changes: no system proxy, no CA in
@@ -191,6 +191,11 @@ get_proxy() {
   image=$("${DOCKER[@]}" image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$SCS_CHANNEL" \
           | awk -v p="$repo@sha256:" 'index($0, p) == 1 { print; exit }')
   [ -n "$image" ] || die "pulled $SCS_CHANNEL but found no digest for it"
+  # A local tag named after the digest keeps repo@sha256:... resolvable once
+  # the channel tag moves on (scs-update does the same).
+  "${DOCKER[@]}" tag "$image" "$repo:sha256-${image##*@sha256:}"
+  OLD_IMAGE=
+  [ ! -f "$SCS_DIR/.env" ] || OLD_IMAGE=$(sed -n 's/^SCS_IMAGE=//p' "$SCS_DIR/.env" | tail -n 1)
   migrate_checkout
   # The container runs unprivileged and writes to these mounts; Docker Engine
   # would create missing ones as root, where it can't.
@@ -213,6 +218,10 @@ start_proxy() {
   [ -z "$other" ] || die "another container ($other) holds port $PROXY_PORT; stop it (docker stop $other) and rerun"
   log "Starting the proxy"
   (cd "$SCS_DIR" && "${DOCKER[@]}" compose up -d)
+  # The release a reinstall replaced.
+  if [ -n "${OLD_IMAGE:-}" ] && [ "$OLD_IMAGE" != "$(sed -n 's/^SCS_IMAGE=//p' "$SCS_DIR/.env" | tail -n 1)" ]; then
+    "${DOCKER[@]}" image rm "${OLD_IMAGE%@sha256:*}:sha256-${OLD_IMAGE##*@sha256:}" >/dev/null 2>&1 || true
+  fi
   local waited=0
   until [ -s "$CA_PEM" ]; do
     [ "$waited" -lt 120 ] || die "the proxy did not write its CA to $CA_PEM"
@@ -229,10 +238,12 @@ start_proxy() {
   done
 }
 
-# The hourly scs-update run: a systemd user timer on Linux (it runs while
-# you are logged in), a launchd agent on macOS.
+# One scs-update run each time you log in after the computer starts: a
+# systemd user timer on Linux (a minute after the user session starts), a
+# launchd agent on macOS (at login). The run may last while it waits for the
+# browser to close, so it has no time limit.
 install_updater() {
-  log "Adding the hourly update check"
+  log "Adding the update check at startup"
   if [ "$OS" = Linux ]; then
     if ! systemctl --user show-environment >/dev/null 2>&1; then
       warn "no systemd user session, so updates won't run on their own; run $SCS_DIR/scs-update now and then"
@@ -246,16 +257,15 @@ Description=Sissy Censor System update check
 
 [Service]
 Type=oneshot
+TimeoutStartSec=infinity
 ExecStart="$SCS_DIR/scs-update"
 UNIT
     cat >"$units/$UPDATE_UNIT.timer" <<UNIT
 [Unit]
-Description=Hourly Sissy Censor System update check
+Description=Sissy Censor System update check at startup
 
 [Timer]
-OnStartupSec=10min
-OnUnitActiveSec=1h
-RandomizedDelaySec=10min
+OnStartupSec=1min
 
 [Install]
 WantedBy=timers.target
@@ -273,7 +283,6 @@ UNIT
 <dict>
   <key>Label</key><string>$UPDATE_AGENT</string>
   <key>ProgramArguments</key><array><string>/bin/bash</string><string>$SCS_DIR/scs-update</string></array>
-  <key>StartInterval</key><integer>3600</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>/dev/null</string>
   <key>StandardErrorPath</key><string>/dev/null</string>
@@ -593,7 +602,7 @@ cat <<EOF
     Profile:      $(profile_dir) (bookmark bar: $ADMIN_BOOKMARK)
     Proxy:        $PROXY_HOST:$PROXY_PORT (Docker, restarts with the machine)
     Admin panel:  http://localhost:8082/admin
-    Install:      $SCS_DIR (updates itself hourly from $SCS_CHANNEL; $SCS_DIR/scs-update --now checks at once)
+    Install:      $SCS_DIR (checks $SCS_CHANNEL for updates at each startup; $SCS_DIR/scs-update --now checks at once)
     Only $BROWSER_NAME goes through the proxy; your other browsers are unchanged.
 EOF
 [ "$GROUP_ADDED" = 0 ] || echo "    Log out and back in so you can run docker without sudo."

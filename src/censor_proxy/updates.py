@@ -50,7 +50,6 @@ def policy_lines() -> list[str]:
     never evaluates them, since it runs on the host."""
     u = load_config().updates
     return [f"enabled={int(u.enabled)}",
-            f"check_hours={u.check_hours:g}",
             f"wait_for_browser={int(u.wait_for_browser)}"]
 
 

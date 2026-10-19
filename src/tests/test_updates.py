@@ -1,21 +1,19 @@
 import json
 
-import pytest
-
 from censor_proxy import config, updates
-from censor_proxy.config import ConfigError, from_override, migrate
+from censor_proxy.config import from_override, migrate
 
 
 def test_policy_lines(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
-    path.write_text("updates:\n  enabled: false\n  check_hours: 1.5\n")
+    path.write_text("updates:\n  enabled: false\n")
     monkeypatch.setenv(config.CONFIG_ENV, str(path))
-    assert updates.policy_lines() == ["enabled=0", "check_hours=1.5", "wait_for_browser=1"]
+    assert updates.policy_lines() == ["enabled=0", "wait_for_browser=1"]
 
 
 def test_policy_reports_a_broken_config(tmp_path, monkeypatch, capsys):
     path = tmp_path / "config.yaml"
-    path.write_text("updates:\n  check_hours: 0\n")
+    path.write_text("updates:\n  enabled: maybe\n  nope: 1\n")
     monkeypatch.setenv(config.CONFIG_ENV, str(path))
     assert updates.main(["policy"]) == 1
     assert capsys.readouterr().out == ""
@@ -38,11 +36,6 @@ def test_version(monkeypatch):
     assert updates.version() == "dev"
     monkeypatch.setenv(updates.VERSION_ENV, "1.2.0")
     assert updates.version() == "1.2.0"
-
-
-def test_check_hours_must_be_positive():
-    with pytest.raises(ConfigError, match="check_hours"):
-        from_override({"updates": {"check_hours": 0}})
 
 
 def test_migrate_renames_and_drops_keys():

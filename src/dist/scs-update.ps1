@@ -1,16 +1,17 @@
 <#
 Sissy Censor System updater for Windows (Linux and macOS: scs-update).
 
-Lives in the install folder (%USERPROFILE%\scs) and runs hourly from the
-scheduled task the installer adds. Each run does what scs-update does:
-reads updates.* through the container, pulls SCS_CHANNEL at most every
-updates.check_hours, and while the Sissy Browser is closed recreates the
-container on a new release, keeping it only once it reports healthy. The
-result goes to logs\update.json (shown in the admin panel) and a history to
-update.log. Nothing read from the container or the folders it can write
-(config, logs, mitmproxy) is evaluated.
+Lives in the install folder (%USERPROFILE%\scs) and runs once each time you
+sign in, from the scheduled task the installer adds. The run does what
+scs-update does: waits for Docker Desktop and the proxy, reads updates.*
+through the container, pulls SCS_CHANNEL (retrying while the network comes
+up), and once the Sissy Browser is closed recreates the container on a new
+release, keeping it only once it reports healthy. The result goes to
+logs\update.json (shown in the admin panel) and a history to update.log.
+Nothing read from the container or the folders it can write (config, logs,
+mitmproxy) is evaluated.
 
-  powershell -ExecutionPolicy Bypass -File scs-update.ps1          what the task runs
+  powershell -ExecutionPolicy Bypass -File scs-update.ps1          what runs at sign-in
   powershell -ExecutionPolicy Bypass -File scs-update.ps1 -Now     check and apply at once
 #>
 param([switch]$Now)
@@ -23,6 +24,12 @@ $State = Join-Path $Dir '.update-state'
 $EnvFile = Join-Path $Dir '.env'
 $LogFile = Join-Path $Dir 'update.log'
 $HealthTimeout = 300
+# At startup: how long to wait for Docker and the proxy, how many times to
+# try the download (a minute apart), and how often to look whether the
+# browser has closed.
+$StartupWait = 900
+$PullTries = 10
+$Poll = 60
 $script:Available = ''
 
 function Log($msg) {
@@ -79,7 +86,15 @@ function Write-Status($state, $message) {
 
 function Container { (docker compose ps -aq $Service 2>$null | Select-Object -First 1) }
 
-$script:Enabled = $true; $script:CheckSeconds = 86400; $script:WaitForBrowser = $true
+# Each image in use (running, being installed, or skipped as bad) keeps a
+# local tag named after its digest. Without one, Docker's containerd image
+# store forgets repo@sha256:... as soon as the channel tag moves on, and a
+# rollback or `docker compose up` would download it again.
+function Keep-Tag($image) { $at = $image.IndexOf('@sha256:'); return $image.Substring(0, $at) + ':sha256-' + $image.Substring($at + 8) }
+function Keep($image) { if ($image) { docker tag $image (Keep-Tag $image) *> $null } }
+function Unkeep($image) { if ($image) { docker image rm (Keep-Tag $image) *> $null } }
+
+$script:Enabled = $true; $script:WaitForBrowser = $true
 function Read-Policy {
     $out = docker compose exec -T $Service python -m censor_proxy.updates policy 2>$null
     if ($LASTEXITCODE -ne 0) { $out = docker compose run --rm -T --no-deps $Service python -m censor_proxy.updates policy 2>$null }
@@ -88,7 +103,6 @@ function Read-Policy {
         switch -Regex ($line) {
             '^enabled=([01])$' { $script:Enabled = $Matches[1] -eq '1' }
             '^wait_for_browser=([01])$' { $script:WaitForBrowser = $Matches[1] -eq '1' }
-            '^check_hours=([0-9]+(\.[0-9]+)?)$' { $script:CheckSeconds = [int]([double]$Matches[1] * 3600) }
         }
     }
 }
@@ -144,10 +158,9 @@ function Apply($target) {
     if ($LASTEXITCODE -eq 0 -and (Wait-Healthy)) {
         Get-ChildItem -Force $stage | ForEach-Object { Move-Item -Force $_.FullName (Join-Path $Dir $_.Name) }
         Remove-Item -Recurse -Force $stage, .compose.yaml.previous -ErrorAction SilentlyContinue
-        Kv-Set $State 'PENDING' ''
-        if ($previous -and $previous -ne $target) { docker image rm $previous *> $null }
+        if ($previous -ne $target) { Unkeep $previous }
         $bad = Kv-Get $State 'BAD'
-        if ($bad -and $bad -ne $target) { docker image rm $bad *> $null }
+        if ($bad -ne $target) { Unkeep $bad }
         Kv-Set $State 'BAD' ''
         Write-Status 'updated' "Updated to $($script:Available)."
         return
@@ -158,64 +171,79 @@ function Apply($target) {
     Kv-Set $EnvFile 'SCS_IMAGE' $previous
     docker compose up -d *>> $LogFile
     Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
-    Kv-Set $State 'PENDING' ''
     Kv-Set $State 'BAD' $target
     Write-Status 'failed' ("Release $($script:Available) didn't start, so the proxy is back on $(Version-Of $previous). " +
                            "It will be skipped until a newer one is out; details in $LogFile.")
 }
 
+function Proxy-State { docker inspect -f '{{.State.Status}}' (Container) 2>$null }
+
+# Pulls the channel, retrying while the network comes up; returns the
+# release to install, or nothing.
 function Check {
     $channel = Kv-Get $EnvFile 'SCS_CHANNEL'
-    if (-not $channel) { Write-Status 'error' "SCS_CHANNEL isn't set in $EnvFile."; return $false }
+    if (-not $channel) { Write-Status 'error' "SCS_CHANNEL isn't set in $EnvFile."; return }
     $repo = $channel.Substring(0, $channel.LastIndexOf(':'))
-    docker pull -q $channel *>> $LogFile
-    if ($LASTEXITCODE -ne 0) { Write-Status 'error' "Couldn't download $channel (offline, or Docker Hub unreachable)."; return $false }
-    Kv-Set $State 'LAST_CHECK' ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+    for ($try = 1; ; $try++) {
+        docker pull -q $channel *>> $LogFile
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($try -ge $PullTries) {
+            Write-Status 'error' "Couldn't download $channel (offline, or Docker Hub unreachable); trying again at the next sign-in."
+            return
+        }
+        Start-Sleep $Poll
+    }
     $latest = docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' $channel 2>$null |
         Where-Object { $_.StartsWith("$repo@sha256:") } | Select-Object -First 1
-    if (-not $latest) { Write-Status 'error' "Downloaded $channel but found no digest for it."; return $false }
+    if (-not $latest) { Write-Status 'error' "Downloaded $channel but found no digest for it."; return }
+    Keep $latest
     $script:Available = Version-Of $latest
     if ($latest -eq (Kv-Get $EnvFile 'SCS_IMAGE')) {
-        Kv-Set $State 'PENDING' ''
         $script:Available = ''
         Write-Status 'up_to_date' 'Running the latest release.'
     } elseif ($latest -eq (Kv-Get $State 'BAD')) {
-        Kv-Set $State 'PENDING' ''
         Write-Status 'skipped' "Release $($script:Available) failed to start here earlier; waiting for a newer one."
     } else {
-        Kv-Set $State 'PENDING' $latest
+        return $latest
     }
-    return $true
 }
 
-# One run at a time; a lock left by a crash expires after two hours.
+# One run at a time: the lock file stays open while this runs, so one left
+# by a run cut off at shutdown doesn't block the next.
 $lock = Join-Path $Dir '.update.lock'
-if ((Test-Path $lock) -and ((Get-Item $lock).LastWriteTime -lt (Get-Date).AddHours(-2))) { Remove-Item -Force $lock }
-try { $lockStream = [System.IO.File]::Open($lock, 'CreateNew', 'Write', 'None') } catch { exit 0 }
+try { $lockStream = [System.IO.File]::Open($lock, 'OpenOrCreate', 'Write', 'None') } catch { exit 0 }
 try {
-    docker info *> $null
-    if ($LASTEXITCODE -ne 0) { Write-Status 'error' "Docker isn't running or can't be reached."; exit 1 }
-    $st = docker inspect -f '{{.State.Status}}' (Container) 2>$null
+    # Docker Desktop starts at sign-in too, and then restarts the proxy. A
+    # proxy still stopped after two minutes was stopped by you, and is left alone.
+    $waited = 0
+    while ($true) {
+        docker info *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $st = Proxy-State
+            if ($st -in @('running', 'restarting') -or ($st -and $waited -ge 120)) { break }
+        }
+        if ($waited -ge $StartupWait) {
+            Write-Status 'error' "Docker or the proxy didn't start within $($StartupWait / 60) minutes; checking again at the next sign-in."
+            exit 1
+        }
+        Start-Sleep 10; $waited += 10
+    }
     if ($st -notin @('running', 'restarting') -and -not $Now) { Log "the proxy isn't running ($st); nothing to do"; exit 0 }
 
     Read-Policy
     if (-not $script:Enabled -and -not $Now) { Write-Status 'disabled' 'Automatic updates are off.'; exit 0 }
+    $target = Check
+    if (-not $target) { exit 0 }
 
-    $last = Kv-Get $State 'LAST_CHECK'
-    $nowTs = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    if ($Now -or $last -notmatch '^[0-9]+$' -or ($nowTs - [long]$last) -ge $script:CheckSeconds) {
-        if (-not (Check)) { exit 1 }
-    }
-    $pending = Kv-Get $State 'PENDING'
-    if (-not $pending) { exit 0 }
-    $script:Available = Version-Of $pending
     if (-not $Now -and $script:WaitForBrowser -and (Test-BrowserOpen)) {
         Write-Status 'pending' "Release $($script:Available) is downloaded and switches in once the Sissy Browser is closed."
-        exit 0
+        while (Test-BrowserOpen) { Start-Sleep $Poll }
+        # Updates may have been turned off on the panel meanwhile.
+        Read-Policy
+        if (-not $script:Enabled) { Write-Status 'disabled' "Automatic updates are off; release $($script:Available) wasn't installed."; exit 0 }
     }
-    Apply $pending
+    Apply $target
 } finally {
     $lockStream.Dispose()
-    Remove-Item -Force $lock -ErrorAction SilentlyContinue
     Get-ChildItem -Force -Directory -Filter '.stage.*' $Dir -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
 }

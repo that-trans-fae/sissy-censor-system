@@ -124,12 +124,13 @@ its video hooks on `video.enabled`. The pieces are filled into the script by
 Users get the image from Docker Hub, never the source: the installers pull
 `SCS_CHANNEL` (`thattransfae/scs:latest`), copy `/app/dist` out of it into `~/scs`
 and run it from there with `.env` pinning `SCS_IMAGE` to a digest.
-`tools/release.sh VERSION` publishes; pushing `latest` is releasing. An
-hourly host job (systemd user timer, launchd agent or scheduled task) runs
-`scs-update`, which pulls the channel at most every `updates.check_hours`,
-recreates the container on a new digest while the Sissy Browser is closed,
-waits for the image's `HEALTHCHECK`, and otherwise restores the old
-compose.yaml and digest and skips that release. It writes
+`tools/release.sh VERSION` publishes; pushing `latest` is releasing. A
+host job (systemd user timer, launchd agent or scheduled task) runs
+`scs-update` once per login after startup: it waits for Docker and the
+proxy, pulls the channel once (retrying while the network comes up),
+waits for the Sissy Browser to close, recreates the container on a new
+digest, waits for the image's `HEALTHCHECK`, and otherwise restores the
+old compose.yaml and digest and skips that release. It writes
 `logs/update.json`, which the panel's Overview shows. The container never
 contacts Docker Hub and has no Docker socket. See `docs/decisions.md`.
 
@@ -205,6 +206,11 @@ decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
 - Docker Desktop's file sharing keeps showing the container a file's old
   contents after the host renames a new file over it, so `scs-update`
   writes `logs/update.json` by delete and exclusive create instead.
+- Docker's containerd image store (the default now) forgets
+  `repo@sha256:...` once the only tag on that image moves, so the image
+  `.env` pins can vanish when the channel tag is pulled anew. The installers
+  and `scs-update` keep a local `repo:sha256-<hex>` tag on every image in
+  use (running, pending or skipped as bad) and drop it when done.
 - `docker ps` truncates commands, so grepping its output for a script name
   silently matches nothing; use `--no-trunc` (or `--filter`) before killing
   a background container.

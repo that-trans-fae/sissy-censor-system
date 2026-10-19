@@ -585,16 +585,14 @@ logging:
 
 updates:
   # Install new releases automatically. The check runs on the host, not in
-  # this container: the installer adds an hourly job (scs-update: a systemd
-  # user timer, a launchd agent or a scheduled task) that pulls the image
-  # from Docker Hub, restarts the proxy on it, and goes back to the old one
-  # if the new one doesn't become healthy. It is the only thing that
-  # contacts the internet on its own. Run `scs-update --now` in the install
-  # folder to check by hand.
+  # this container: the installer adds a job (scs-update: a systemd user
+  # timer, a launchd agent or a scheduled task) that runs once each time you
+  # log in after the computer starts. It pulls the image from Docker Hub,
+  # restarts the proxy on it, and goes back to the old one if the new one
+  # doesn't become healthy. It is the only thing that contacts the internet
+  # on its own. Run `scs-update --now` in the install folder to check by hand.
   enabled: true
-  # Hours between checks for a new image.
-  check_hours: 24
-  # Restart onto a downloaded update only while the Sissy Browser is closed,
-  # since the restart cuts the proxy off for a few seconds. false: restart
-  # as soon as it has downloaded.
+  # Restart onto a downloaded update only once the Sissy Browser is closed
+  # (the check waits for it), since the restart cuts the proxy off for a few
+  # seconds. false: restart as soon as it has downloaded.
   wait_for_browser: true

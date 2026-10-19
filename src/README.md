@@ -274,7 +274,7 @@ tools/release.sh 1.2.0
 
 It needs a clean checkout and `docker login`, builds for amd64 and arm64,
 pushes `VERSION` and `latest`, and tags the commit `v1.2.0`. Installs pick
-up `latest` within a day (`updates.check_hours`) once the Sissy Browser is
+up `latest` the next time their computer starts, once the Sissy Browser is
 closed, and go back to the release they had if the new one's health check
 (`python -m censor_proxy.updates health`, the image's `HEALTHCHECK`) doesn't
 pass within five minutes. So that old installs keep starting:

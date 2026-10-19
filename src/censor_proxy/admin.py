@@ -805,7 +805,6 @@ class _Handler(BaseHTTPRequestHandler):
                                     "config_editable": admin.file.editable,
                                     "version": updates.version(),
                                     "updates": {"enabled": admin.cfg.updates.enabled,
-                                                "check_hours": admin.cfg.updates.check_hours,
                                                 "wait_for_browser": admin.cfg.updates.wait_for_browser,
                                                 "last": updates.read_status(admin.update_status)}})
         if (method, name) == ("GET", "log"):

@@ -74,22 +74,26 @@ The proxy itself runs from `~/scs` (`%USERPROFILE%\scs`):
 
 ## Updates
 
-The installer adds an hourly job: a systemd user timer `scs-update.timer`
-on Linux (it runs while you are logged in), a launchd agent
-`local.scs.update` on macOS, and a scheduled task "Sissy Censor System
-update" on Windows. Each run of `scs-update`:
+The installer adds a job that checks for an update once each time you log
+in after the computer starts: a systemd user timer `scs-update.timer` on
+Linux (a minute after your session starts), a launchd agent
+`local.scs.update` on macOS (at login), and a scheduled task "Sissy Censor
+System update" on Windows (a minute after sign-in). Nothing runs on a
+schedule after that. The run of `scs-update`:
 
-1. reads `updates.*` from your settings. With automatic updates off (the
+1. waits for Docker and the proxy to come up (Docker Desktop starts at
+   login too), for up to 15 minutes.
+2. reads `updates.*` from your settings. With automatic updates off (the
    switch on the admin panel's Overview) it stops here.
-2. at most once a day (`updates.check_hours`), pulls `SCS_CHANNEL`
-   (`thattransfae/scs:latest`) from Docker Hub. This is the only thing the install
-   sends to the internet on its own.
-3. if that is a new release and the Sissy Browser is closed
-   (`updates.wait_for_browser`), switches the proxy to it: the new
+3. pulls `SCS_CHANNEL` (`thattransfae/scs:latest`) from Docker Hub, trying
+   for up to ten minutes while the network comes up. This is the only thing
+   the install sends to the internet on its own.
+4. if that is a new release, waits until the Sissy Browser is closed
+   (`updates.wait_for_browser`), then switches the proxy to it: the new
    `compose.yaml` goes in place, `SCS_IMAGE` in `.env` moves to the new
    digest and the container is recreated, which takes the proxy away for a
    few seconds.
-4. keeps the new release once its health check passes, usually within 15
+5. keeps the new release once its health check passes, usually within 15
    seconds. If it doesn't pass within five minutes, the old `compose.yaml`
    and image go back, and that release is skipped until a newer one is out.
 

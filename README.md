@@ -191,12 +191,12 @@ Linux capability dropped, and with both of its ports bound to `127.0.0.1`
 so nothing else on your network can reach it. It has no access to the
 Docker socket and never contacts Docker Hub itself.
 
-**3. An hourly update job.** A systemd user timer on Linux, a launchd
-agent on macOS, a scheduled task on Windows. It runs `scs-update`, which at
-most once a day asks Docker Hub whether there is a newer release. If there
-is, and the Sissy Browser is closed, it switches to the new image, waits
-for its health check to pass, and rolls back to the old one if it does
-not. The result shows on the admin panel's Overview tab. You can turn
+**3. An update check at startup.** A systemd user timer on Linux, a
+launchd agent on macOS, a scheduled task on Windows. Once each time you log
+in after the computer starts, it runs `scs-update`, which asks Docker Hub
+once whether there is a newer release. If there is, it waits until the
+Sissy Browser is closed, switches to the new image, waits for its health
+check to pass, and rolls back to the old one if it does not. The result shows on the admin panel's Overview tab. You can turn
 automatic updates off there, or pin a version by setting the channel in
 `.env` to a tag such as `thattransfae/scs:1.2.0`.
 

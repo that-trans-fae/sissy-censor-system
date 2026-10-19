@@ -3,8 +3,8 @@ Sissy Censor System: dedicated browser installer for Windows.
 
 Installs Docker Desktop, Chromium and the sqlite3 tool with winget, pulls
 the proxy image from Docker Hub and starts it from %USERPROFILE%\scs, adds
-an hourly scheduled task that keeps it updated (scs-update.ps1, from the
-image), and adds a "Sissy Browser" shortcut to the Start menu and desktop:
+a scheduled task that checks for updates at each sign-in (scs-update.ps1,
+from the image), and adds a "Sissy Browser" shortcut to the Start menu and desktop:
 a separate Chromium profile that always goes through the proxy and trusts
 its CA in the profile's own certificate store. Nothing system-wide changes:
 no Windows proxy, no CA in the Windows store, and your usual browsers are
@@ -134,6 +134,14 @@ function Get-Proxy {
     $image = docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' $ScsChannel |
         Where-Object { $_.StartsWith("$repo@sha256:") } | Select-Object -First 1
     if (-not $image) { Die "pulled $ScsChannel but found no digest for it" }
+    # A local tag named after the digest keeps repo@sha256:... resolvable once
+    # the channel tag moves on (scs-update.ps1 does the same).
+    docker tag $image ($repo + ':sha256-' + ($image -split '@sha256:')[1])
+    $envFile = Join-Path $ScsDir '.env'
+    $script:OldImage = if (Test-Path $envFile) {
+        (Get-Content $envFile | Where-Object { $_.StartsWith('SCS_IMAGE=') } | Select-Object -Last 1) -replace '^SCS_IMAGE=', ''
+    }
+    $script:NewImage = $image
     New-Item -ItemType Directory -Force -Path $ScsDir | Out-Null
     Move-OldCheckout
     foreach ($d in 'mitmproxy', 'config', 'logs') { New-Item -ItemType Directory -Force -Path (Join-Path $ScsDir $d) | Out-Null }
@@ -160,6 +168,10 @@ function Start-Proxy {
         docker compose up -d
         if ($LASTEXITCODE -ne 0) { Die 'docker compose up failed' }
     } finally { Pop-Location }
+    # The release a reinstall replaced.
+    if ($script:OldImage -and $script:OldImage -ne $script:NewImage) {
+        docker image rm (($script:OldImage -split '@sha256:')[0] + ':sha256-' + ($script:OldImage -split '@sha256:')[1]) *> $null
+    }
     $waited = 0
     while (-not ((Test-Path $CaPem) -and (Get-Item $CaPem).Length -gt 0)) {
         if ($waited -ge 120) { Die "the proxy did not write its CA to $CaPem" }
@@ -178,16 +190,19 @@ function Start-Proxy {
     }
 }
 
-# The hourly scs-update.ps1 run, as a task of this user. conhost --headless
-# keeps a console window from showing.
+# One scs-update.ps1 run each time you sign in, as a task of this user, a
+# minute after sign-in. conhost --headless keeps a console window from
+# showing. The run may last while it waits for the browser to close, so it
+# has no time limit.
 function Install-Updater {
-    Log 'Adding the hourly update check'
+    Log 'Adding the update check at sign-in'
     $script = Join-Path $ScsDir 'scs-update.ps1'
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`""
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10) -RepetitionInterval (New-TimeSpan -Hours 1)
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+    $trigger.Delay = 'PT1M'
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName $UpdateTask -Action $action -Trigger $trigger -Settings $settings `
         -Description 'Keeps the Sissy Censor System proxy up to date' -Force | Out-Null
 }
@@ -414,7 +429,7 @@ Write-Host @"
     Profile:      $ProfileDir (bookmark bar: $AdminBookmark)
     Proxy:        $ProxyHost`:$ProxyPort (Docker, starts with Windows)
     Admin panel:  http://localhost:8082/admin
-    Install:      $ScsDir (updates itself hourly from $ScsChannel)
+    Install:      $ScsDir (checks $ScsChannel for updates at each sign-in)
     Only $BrowserName goes through the proxy; your other browsers are unchanged.
     The CA is trusted inside the profile: rerun this installer if you ever
     delete $ScsDir\mitmproxy and the proxy makes a new CA.

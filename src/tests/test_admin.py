@@ -95,7 +95,7 @@ def test_status_shows_version_and_updates(panel, tmp_path, monkeypatch):
     monkeypatch.setenv("SCS_VERSION", "1.2.0")
     _, body = client("GET", "/admin/api/status")
     assert body["version"] == "1.2.0"
-    assert body["updates"] == {"enabled": True, "check_hours": 24, "wait_for_browser": True, "last": None}
+    assert body["updates"] == {"enabled": True, "wait_for_browser": True, "last": None}
     (tmp_path / "update.json").write_text(json.dumps({"state": "pending", "message": "Waiting."}))
     r, body = client("POST", "/admin/api/config", {"set": {"updates.enabled": False}})
     assert r.status == 200

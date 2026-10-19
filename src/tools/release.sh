@@ -2,7 +2,7 @@
 # Builds the image for amd64 and arm64 (Apple silicon, ARM Linux) and pushes
 # it to Docker Hub as VERSION and latest. Installs follow latest
 # (SCS_CHANNEL in their .env), so pushing is releasing: every installed
-# copy picks it up within a day (see dist/scs-update).
+# copy picks it up the next time its computer starts (see dist/scs-update).
 #
 #   tools/release.sh 1.2.0
 #

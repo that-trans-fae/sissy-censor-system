@@ -268,7 +268,6 @@ class LoggingConfig:
 @dataclass(frozen=True)
 class UpdatesConfig:
     enabled: bool
-    check_hours: float
     wait_for_browser: bool
 
 
@@ -474,7 +473,6 @@ def _build(raw: dict[str, Any]) -> Config:
         "cache": CacheConfig(**raw["cache"]),
         "logging": LoggingConfig(**raw["logging"]),
         "updates": UpdatesConfig(enabled=bool(raw["updates"]["enabled"]),
-                                 check_hours=float(raw["updates"]["check_hours"]),
                                  wait_for_browser=bool(raw["updates"]["wait_for_browser"])),
     }
     cfg = Config(**sections)
@@ -544,8 +542,6 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("admin.port and proxy.internal_port must differ")
     if cfg.admin.session_seconds <= 0:
         raise ConfigError("admin.session_seconds must be > 0")
-    if cfg.updates.check_hours <= 0:
-        raise ConfigError("updates.check_hours must be > 0")
 
 
 def defaults() -> dict:
