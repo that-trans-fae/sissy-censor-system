@@ -64,6 +64,15 @@ Last updated Oct 18, 2026.
 - **Tuning from real browsing**: thresholds were tuned on 15 samples; review
   `src/logs/detections.jsonl` for misses and false positives
 
+- **Male subjects read as female in video**: a 437 s vertical video of a
+  male subject (Pornhub viewkey 6710b29dca308) had 8,496 frames censored,
+  all genuine `FEMALE_BREAST_EXPOSED` detections (median 0.44, max 0.76;
+  male breast score under 0.26) in half the samples. Per-frame rules can't
+  fix it: a penis or male face is in frame in only ~5% (320n) / ~35% (640m)
+  of those samples, and 200 of 1,244 censored-breast images in the browsing
+  log also show a penis. Next: video-level (rolling-window) attribution;
+  see `docs/handoff-video-attribution.md`
+
 - **Security warning**: tell the user that video injection extends every
   page's CSP and lets pages ask the proxy to fetch public video URLs
 
