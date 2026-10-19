@@ -140,6 +140,8 @@ class VideoConfig:
     preset: str
     crf: int
     ready_seconds: float
+    segment_seconds: float
+    seek_wait_seconds: float
     max_duration_seconds: float
     max_concurrent_jobs: int
     max_queued_jobs: int
@@ -409,6 +411,8 @@ def _validate(cfg: Config) -> None:
                 raise ConfigError(f"{key}: bad regex {pattern!r}: {e}") from e
     if cfg.video.sample_fps <= 0:
         raise ConfigError("video.sample_fps must be > 0")
+    if cfg.video.segment_seconds <= 0 or cfg.video.seek_wait_seconds < 0:
+        raise ConfigError("video.segment_seconds must be > 0 and video.seek_wait_seconds >= 0")
     if cfg.video.abandon_seconds <= 0 or cfg.video.idle_seconds <= 0:
         raise ConfigError("video.abandon_seconds and video.idle_seconds must be > 0")
     a = cfg.video_attribution

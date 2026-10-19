@@ -24,12 +24,12 @@ page (allowlisted host)
        │                player fetched)
        │  click "play censored"
        ▼
-  <video src="https://censor.local/video/<job>">  ◄── fragmented MP4, streamed
-                                                        as it is produced
+  <video> fed by Media Source Extensions  ◄── fMP4 segments, fetched just
+                                                  ahead of the playhead
 proxy
   └─ job: ffmpeg reads the source (file or manifest) ──► raw frames
           detect every Nth frame (320n), boxes held across the gap,
-          blur ──► ffmpeg encodes H.264 + copies audio ──► fMP4
+          blur ──► ffmpeg encodes H.264 + copies audio ──► fMP4 segments
 ```
 
 ## Pieces
@@ -57,13 +57,15 @@ proxy
      scripts, JSON-escaped or not. When there is one per quality, the
      tallest at or under `video.max_height` (read from names like
      `720P_4000K`) wins.
-   - On click, asks the proxy to start a job, then swaps in a plain
-     `<video controls>` pointing at the job's stream, and shows progress
-     until playback can start.
+   - On click, asks the proxy to start a job, shows progress until the
+     first segments are ready, then swaps in a plain `<video controls>`
+     that plays the job's segments through Media Source Extensions (see
+     "Seeking").
 3. **Proxy endpoints** on `https://censor.local` (mitmproxy issues its cert;
    needs `connection_strategy=lazy` so it doesn't try to reach a real host):
-   `POST /video` starts a job, `GET /video/<job>` streams the output,
-   `GET /video/<job>/status` reports progress.
+   `POST /video/jobs` starts a job, `GET /video/<job>/segment/<n>` and
+   `/init/<run>` serve the output, `GET /video/<job>/status` reports
+   progress.
 4. **Video pipeline** (`censor_proxy/video.py`)
    - ffmpeg decodes the source (it reads HLS, DASH and plain files
      natively) at a capped resolution (default 720p) into raw frames.
@@ -71,8 +73,9 @@ proxy
      is applied to every frame between its sample and the next, as with
      GIFs now, plus extra padding for motion.
    - The same `decide()` rules and censor styles as images.
-   - ffmpeg re-encodes H.264 (veryfast) into fragmented MP4 so playback
-     starts before the job finishes; audio is copied.
+   - ffmpeg re-encodes H.264 (veryfast) into fixed-length fragmented MP4
+     segments (`video.segment_seconds`, 4 s) so playback starts before the
+     job finishes; audio is re-encoded to AAC.
    - Finished outputs are cached by source URL and page origin so replays
      and seeks are instant; the cache is size-capped. Job ids are random,
      so a page can't derive another site's job from a video URL.
@@ -97,6 +100,39 @@ proxy
 5. **Fail closed**: if a job errors, the video stays covered and the
    control shows the error. Nothing plays uncensored.
 
+## Seeking
+
+The first version streamed one growing MP4, which the browser could only
+seek within once the whole job was done (Oct 19, 2026: seeking on
+streaming sites didn't work). Now the output is cut into segments, and the
+job can be restarted anywhere:
+
+- Segment n always holds the same frames: a whole number of detection
+  samples, starting on a keyframe the encoder is forced to put there. A
+  run (one ffmpeg decoder and encoder) starts at a segment, seeking the
+  source there (`-ss`, frame-accurate), and goes on until the end of the
+  video, a segment that is already done, or a seek elsewhere.
+- The page's player asks for segments a little ahead of the playhead (30 s)
+  and lets go of what is 30 s behind. A request for a segment that isn't
+  done waits for it. If the current run will reach it within
+  `video.seek_wait_seconds` (10 s of video), it just waits; otherwise the
+  run is killed and a new one starts at that segment, about 1.5 s from
+  seek to picture on a local source. The segment in progress (and the one
+  the encoder hadn't written out yet) is lost.
+- After the end, the job goes back for the segments it skipped, so the
+  finished copy is complete and later seeks are instant.
+- ffmpeg's HLS muxer writes the segments (fMP4, each renamed into place
+  when complete). Each run gets its own init segment and its timestamps
+  start at 0, so each segment response says which init segment it needs
+  (`X-Init`) and where its run starts (`X-Offset`, the player's
+  `timestampOffset`). Where two runs meet, the audio can leave a gap of a
+  few hundredths of a second; the player steps over gaps under 0.5 s.
+- MediaSource needs `blob:` in the page's `media-src`; it is added there
+  (and a `media-src` made from `default-src` when the page only has that,
+  so blob: scripts stay blocked).
+- With video attribution on, each run's scan starts `history_seconds`
+  before the run.
+
 ## Videos we can't censor
 
 Any video still gets the injected control, even when
@@ -116,8 +152,9 @@ The control's look (name, colours, icons, strings) lives in one place: the
   up. 640m with tiling is about 10 s per second of video, so video always
   uses 320n regardless of the image model (configurable).
 - **Image size**: ffmpeg adds about 100–150 MB to the Docker image.
-- **Seeking** past the part already processed waits for the job to reach
-  it.
+- **Seeking** past the part already processed restarts the job there; the
+  player waits a second or two (longer on a slow source) for the first
+  segment.
 - **Tokenised URLs**: sites that sign source URLs per page load (Pornhub)
   get a new job, and no cache hit, each time the page is reloaded.
 - **Cookies**: the proxy fetches the source itself, so videos that need the

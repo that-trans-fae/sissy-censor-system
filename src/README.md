@@ -121,7 +121,9 @@ grep '"unscanned"' logs/detections.jsonl
 On every site (narrow it with `video.hosts`) every video is paused and
 covered by an injected control. "Play censored" has the proxy fetch the
 video, blur it with ffmpeg and stream the censored copy back; playback
-starts after a few seconds of video are ready. Videos the control can't find
+starts after a few seconds of video are ready. Seeking works at any time:
+past the part already censored, the proxy starts censoring from there and
+playback resumes after a second or two. Videos the control can't find
 a source for stay covered. The control's text and colours are at the top of
 `censor_proxy/static/inject.js`; its name is `video.brand_name`.
 

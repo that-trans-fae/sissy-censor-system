@@ -61,7 +61,7 @@ def test_pump_holds_boxes_across_unsampled_frames(cfg):
     # Frames 1-3 (before sample 4) and 4-11 (until the next sample's boxes
     # replace it) are covered; frame 0 and 9 (after sample 8, no boxes) aren't.
     assert changed == [False, True, True, True, True, True, True, True, True, False]
-    assert job.frames_censored == 8 and abs(job.seconds_done - 1.0) < 1e-9
+    assert job.frames_censored == 8
 
 
 def test_pump_fails_closed_on_detector_error(cfg):
@@ -83,22 +83,89 @@ def make_test_video(path: Path, seconds=2, audio=True):
     subprocess.run(cmd, check=True)
 
 
+def local_files(cfg, **video):
+    # Local files, which the default protocol list refuses.
+    return replace(cfg, video=replace(cfg.video, **video,
+                                      source_protocols=(*cfg.video.source_protocols, "file")))
+
+
+def segment_info(job, n):
+    """ffprobe of segment n behind its run's init segment."""
+    data = job.init_path(job.run_of[n][0]).read_bytes() + job.segment_path(n).read_bytes()
+    out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams",
+                          "-count_packets", "-"], input=data, capture_output=True, check=True)
+    return {s["codec_type"]: s for s in json.loads(out.stdout)["streams"]}
+
+
 @needs_ffmpeg
 def test_censor_video_end_to_end(cfg, tmp_path):
     src = tmp_path / "in.mp4"
     make_test_video(src)
-    # A local file, which the default protocol list refuses.
-    cfg = replace(cfg, video=replace(cfg.video, source_protocols=(*cfg.video.source_protocols, "file")))
-    job = Job("t", str(src), path=tmp_path / "out.mp4")
+    job = Job("t", str(src), out_dir=tmp_path / "out")
     fake = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=(100, 80, 60, 60))])
-    censor_video(job, cfg, fake)
-    info = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams",
-                                      "-show_format", str(job.path)], capture_output=True, check=True).stdout)
-    kinds = sorted(s["codec_type"] for s in info["streams"])
-    assert kinds == ["audio", "video"]
-    assert abs(float(info["format"]["duration"]) - 2.0) < 0.3
-    # 10 fps sampled at 4/s -> every 2nd frame goes through detection.
+    censor_video(job, local_files(cfg, segment_seconds=1), fake)
+    # 10 fps sampled at 4/s -> every 2nd frame goes through detection, and
+    # segments are a whole number of samples: 10 frames.
+    assert (job.segment_frames, job.segment_seconds, job.segments) == (10, 1.0, 2)
+    assert job.done == {0, 1} and job.seconds_done == 2.0 and job.runs == 1
+    assert job.codecs.startswith("avc1.") and job.codecs.endswith(",mp4a.40.2")
+    for n in (0, 1):
+        info = segment_info(job, n)
+        assert sorted(info) == ["audio", "video"] and info["video"]["nb_read_packets"] == "10"
     assert job.frames_censored == 20 and fake.calls == 10
+
+
+@needs_ffmpeg
+def test_seek_restarts_the_job_there_then_fills_the_gap(cfg, tmp_path):
+    src = tmp_path / "in.mp4"
+    make_test_video(src, seconds=6, audio=False)
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    calls = 0
+
+    def detect(bgr):
+        nonlocal calls
+        calls += 1
+        if calls == 3:  # early in segment 0, a viewer jumps to segment 4
+            job.seek(4, wait_segments=1)
+        return []
+    censor_video(job, local_files(cfg, segment_seconds=1), FakeDetector(detect))
+    assert job.segments == 6 and job.done == set(range(6))
+    # Run 1 stopped at the seek, run 2 went from 4 to the end, and run 3
+    # came back for what was skipped and stopped at segment 4, already done.
+    assert job.runs == 3 and {n: job.run_of[n] for n in range(6)} == {
+        0: (3, 0), 1: (3, 0), 2: (3, 0), 3: (3, 0), 4: (2, 4), 5: (2, 4)}
+    assert not list(job.out_dir.glob("*.tmp"))
+    for n in range(6):
+        assert segment_info(job, n)["video"]["nb_read_packets"] == "10"
+
+
+def test_seek_waits_when_the_job_is_close():
+    job = Job("t", "x", segments=10, position=3, run_first=2)
+    job.seek(5, wait_segments=2)
+    assert job.restart_at is None  # it gets there soon enough
+    job.seek(2, wait_segments=2)
+    assert job.restart_at is None  # fed already; the encoder writes it once it has segment 3
+    job.seek(6, wait_segments=2)
+    assert job.restart_at == 6
+    job.seek(1, wait_segments=2)
+    assert job.restart_at == 1  # behind the run: it never goes back on its own
+    job.take_restart()
+    job.seek(12, wait_segments=2)  # past the end
+    job.done.add(8)
+    job.seek(8, wait_segments=2)  # already done
+    assert job.restart_at is None
+    unknown = Job("t", "x", position=0)  # length unknown: nothing to seek in
+    unknown.seek(9, wait_segments=2)
+    assert unknown.restart_at is None
+
+
+def test_ready_needs_the_first_segments():
+    job = Job("t", "x", state="running", segment_seconds=2.0, segments=5, codecs="avc1.64001f")
+    assert not job.status(3)["ready"]
+    job.done |= {0, 3}
+    assert not job.status(3)["ready"]  # 2 s from the start
+    job.done.add(1)
+    assert job.status(3)["ready"]
 
 
 def test_pump_stops_when_nobody_is_watching(cfg):
@@ -111,11 +178,14 @@ def test_pump_stops_when_nobody_is_watching(cfg):
 
 def test_startup_clears_earlier_outputs_only(cfg, tmp_path):
     old = tmp_path / f"{'a' * 24}-3.mp4"
+    old_dir = tmp_path / f"{'b' * 24}-4"
     other = tmp_path / "holiday.mp4"
     old.write_bytes(b"x")
+    old_dir.mkdir()
+    (old_dir / "seg-00000.m4s").write_bytes(b"x")
     other.write_bytes(b"x")
     VideoJobs(replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path))), FakeDetector())
-    assert not old.exists() and other.exists()
+    assert not old.exists() and not old_dir.exists() and other.exists()
 
 
 def test_abandoned_queued_job_never_runs(cfg, tmp_path, monkeypatch):
@@ -130,7 +200,7 @@ def test_abandoned_queued_job_never_runs(cfg, tmp_path, monkeypatch):
 
 @needs_ffmpeg
 def test_censor_video_rejects_unreadable_source(cfg, tmp_path):
-    job = Job("t", str(tmp_path / "missing.mp4"), path=tmp_path / "out.mp4")
+    job = Job("t", str(tmp_path / "missing.mp4"), out_dir=tmp_path / "out")
     with pytest.raises(Exception, match="cannot read source"):
         censor_video(job, cfg, FakeDetector())
 
@@ -141,10 +211,10 @@ def test_local_files_refused_by_protocol_whitelist(cfg, tmp_path):
     # what a playlist references once ffmpeg is reading it.
     src = tmp_path / "in.mp4"
     make_test_video(src)
-    job = Job("t", str(src), path=tmp_path / "out.mp4")
+    job = Job("t", str(src), out_dir=tmp_path / "out")
     with pytest.raises(VideoError, match="cannot read source.*whitelist"):
         censor_video(job, cfg, FakeDetector())
-    assert not job.path.exists()
+    assert not job.out_dir.exists()
 
 
 def test_start_takes_referer_from_origin_not_page(cfg, tmp_path, monkeypatch):
@@ -254,23 +324,52 @@ def test_server_health_and_inject_js(server):
     assert b'Number("400")' in body  # images.placeholder_delay_ms
 
 
-def test_server_streams_running_job_then_serves_ranges(server, tmp_path):
+def test_server_serves_segments_as_they_are_done(server, tmp_path):
     srv, jobs, base = server
-    job = Job("a" * 24, "https://example.com/v.mp4", path=tmp_path / "v.mp4", state="running")
+    job = Job("a" * 24, "https://example.com/v.mp4", out_dir=tmp_path / "v", state="running",
+              segment_seconds=2.0, segments=3, position=1)
+    job.out_dir.mkdir()
     jobs._jobs[job.id] = job
-    job.path.write_bytes(b"x" * 1000)
+    job.init_path(1).write_bytes(b"init1")
+    job.init_path(2).write_bytes(b"init2")
+    job.segment_path(0).write_bytes(b"seg0")
+    job.run_of[0] = (1, 0)
+    origin = {"Origin": "https://www.reddit.com"}
+    status, headers, body = get(f"{base}/video/{job.id}/segment/0", origin)
+    assert status == 200 and body == b"seg0"
+    assert (headers["X-Init"], headers["X-Offset"]) == ("1", "0.000000")
+    assert headers["Access-Control-Allow-Origin"] == "https://www.reddit.com"
+    assert "X-Init" in headers["Access-Control-Expose-Headers"]
+    assert get(f"{base}/video/{job.id}/init/2")[2] == b"init2"
 
+    # Not done yet: the request waits for it (the job is working on it, so
+    # no restart).
     def finish():
-        with job.path.open("ab") as f:
-            f.write(b"y" * 500)
-        job.update(state="done", seconds_done=1)
+        job.run_of[1] = (2, 1)
+        job.segment_path(1).write_bytes(b"seg1")
+        job.update()
     threading.Timer(0.3, finish).start()
-    status, headers, body = get(f"{base}/video/{job.id}/stream")
-    assert headers.get("Transfer-Encoding") == "chunked" and body == b"x" * 1000 + b"y" * 500
+    status, headers, body = get(f"{base}/video/{job.id}/segment/1")
+    assert body == b"seg1" and headers["X-Offset"] == "2.000000" and job.restart_at is None
+    status, _, body = get(f"{base}/video/{job.id}/segment/3")
+    assert status == 204 and body == b""  # past the end
 
-    status, headers, body = get(f"{base}/video/{job.id}/stream", {"Range": "bytes=990-1009"})
-    assert status == 206 and headers["Content-Range"] == "bytes 990-1009/1500"
-    assert body == b"x" * 10 + b"y" * 10
+    job.update(state="error", error="boom")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(f"{base}/video/{job.id}/segment/2")
+    assert e.value.code == 409
+
+
+def test_server_segment_request_restarts_the_job(server, monkeypatch):
+    srv, jobs, base = server
+    monkeypatch.setattr("censor_proxy.server.SEGMENT_WAIT", 0.2)
+    job = Job("f" * 24, "https://example.com/v.mp4", state="running", segment_seconds=4.0,
+              segments=100, position=2)
+    jobs._jobs[job.id] = job
+    status, _, body = get(f"{base}/video/{job.id}/segment/4")  # within seek_wait_seconds
+    assert status == 202 and job.restart_at is None
+    status, _, body = get(f"{base}/video/{job.id}/segment/50")
+    assert status == 202 and job.restart_at == 50
 
 
 def post_job(base, body, origin="https://www.reddit.com"):
@@ -309,7 +408,7 @@ def test_server_passes_origin_and_page_to_jobs(server, monkeypatch):
     with urllib.request.urlopen(req) as r:
         headers, body = dict(r.headers), json.loads(r.read())
     assert headers["Access-Control-Allow-Origin"] == "https://www.reddit.com"
-    assert body["stream_url"] == f"/video/{'d' * 24}/stream"
+    assert body["status_url"] == f"/video/{'d' * 24}/status"
     assert calls == [("https://example.com/v.mp4", "https://www.reddit.com", "UA/1",
                       "https://www.reddit.com/r/x")]
 

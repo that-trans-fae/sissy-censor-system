@@ -7,16 +7,24 @@ and the video job API.
   POST /video/jobs            {"src": url, "page": url}  (text/plain, so no CORS preflight)
   GET  /video/<id>/status?active=0|1  active=0: paused or in a background tab
   POST /video/<id>/cancel     the page no longer wants it (closed, navigated)
-  GET  /video/<id>/stream     fragmented MP4; streamed while the job runs,
-                              Range-capable once it is done
+  GET  /video/<id>/init/<run> a run's fMP4 init segment
+  GET  /video/<id>/segment/<n>
+                              segment n, once done; waits up to SEGMENT_WAIT
+                              for it, and restarts the job there unless it
+                              will get there soon. 202: not yet, ask again.
+                              204: past the end. X-Init names the run whose
+                              init segment it needs, X-Offset the time its
+                              timestamps start from.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,9 +37,12 @@ from .video import Job, JobRefused, VideoError, VideoJobs
 log = logging.getLogger("censor_proxy.server")
 
 STATIC = Path(__file__).with_name("static")
-JOB_PATH = re.compile(r"^/video/([0-9a-f]{24})/(status|stream)$")
+JOB_PATH = re.compile(r"^/video/([0-9a-f]{24})/(status|init/(\d{1,6})|segment/(\d{1,6}))$")
 CANCEL_PATH = re.compile(r"^/video/([0-9a-f]{24})/cancel$")
-CHUNK = 256 * 1024
+# How long a segment request waits for the job before answering 202. Under
+# the browser's own timeouts, and short enough that a page that went away
+# doesn't keep a thread waiting long.
+SEGMENT_WAIT = 15.0
 
 
 class InternalServer:
@@ -118,7 +129,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self._cors()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Range")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -145,7 +156,9 @@ class _Handler(BaseHTTPRequestHandler):
             job.touch(active=query.get("active", ["1"])[0] != "0")
             return self._json(200, job.status(self.app.cfg.video.ready_seconds))
         job.touch()
-        self._stream(job)
+        if m.group(3) is not None:
+            return self._init(job, int(m.group(3)))
+        self._segment(job, int(m.group(4)))
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
@@ -181,85 +194,70 @@ class _Handler(BaseHTTPRequestHandler):
         except (ValueError, VideoError) as e:
             return self._json(400, {"error": str(e)})
         status = job.status(self.app.cfg.video.ready_seconds)
-        self._json(200, {**status, "status_url": f"/video/{job.id}/status",
-                         "stream_url": f"/video/{job.id}/stream"})
+        self._json(200, {**status, "status_url": f"/video/{job.id}/status"})
 
-    # -- streaming --------------------------------------------------------
+    # -- segments ---------------------------------------------------------
 
-    def _stream(self, job: Job) -> None:
-        if job.state == "done" and job.path and job.path.exists():
-            return self._serve_file(job.path)
-        if job.state == "error" or not job.path:
+    def _init(self, job: Job, run: int) -> None:
+        path = job.init_path(run) if job.out_dir and job.state != "error" else None
+        if not path or not path.is_file():
+            return self._json(404, {"error": "not found"})
+        self._send_file(path)
+
+    def _segment(self, job: Job, n: int) -> None:
+        v = self.app.cfg.video
+        deadline = time.monotonic() + SEGMENT_WAIT
+        # Decided under the job's lock, answered after it: the pump needs it.
+        with job.changed:
+            while True:
+                if job.check(n):
+                    outcome, (run, first) = "ready", job.run_of[n]
+                    break
+                wait = math.ceil(v.seek_wait_seconds / job.segment_seconds) if job.segment_seconds else 0
+                job.seek(n, wait)
+                if job.state == "error":
+                    outcome = "error"
+                    break
+                if job.state == "done" or (job.segments is not None and n >= job.segments):
+                    outcome = "end"
+                    break
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    outcome = "later"
+                    break
+                job.changed.wait(min(left, 1.0))
+                job.touch()
+        if outcome == "error":
             return self._json(409, {"error": job.error or "job failed"})
-        # Still running: send the growing file with chunked encoding until the
-        # job finishes. Seeking needs the finished file (Range support).
+        if outcome == "end":
+            return self._empty(HTTPStatus.NO_CONTENT)
+        if outcome == "later":
+            return self._json(202, {"state": job.state})
+        self._send_file(job.segment_path(n), {
+            "X-Init": str(run),
+            "X-Offset": f"{first * job.segment_seconds:.6f}",
+            "Access-Control-Expose-Headers": "X-Init, X-Offset",
+        })
+
+    def _empty(self, status: int) -> None:
+        self.send_response(status)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_file(self, path: Path, headers: dict[str, str] | None = None) -> None:
+        try:
+            data = path.read_bytes()  # segments are a few MB at most
+        except OSError:  # evicted or cancelled meanwhile
+            return self._json(404, {"error": "not found"})
         self.send_response(200)
         self._cors()
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Type", "video/mp4")
-        self.send_header("Transfer-Encoding", "chunked")
-        self.end_headers()
-        sent = 0
-        try:
-            while True:
-                with job.changed:
-                    if job.state == "running" and not _grew(job.path, sent):
-                        job.changed.wait(timeout=1.0)
-                    finished = job.state in ("done", "error")
-                sent = self._send_new(job.path, sent)
-                job.touch()
-                if finished:
-                    sent = self._send_new(job.path, sent)
-                    break
-            self.wfile.write(b"0\r\n\r\n")
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-    def _send_new(self, path: Path, offset: int) -> int:
-        if not path.exists():
-            return offset
-        with path.open("rb") as f:
-            f.seek(offset)
-            while chunk := f.read(CHUNK):
-                self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
-                offset += len(chunk)
-        return offset
-
-    def _serve_file(self, path: Path) -> None:
-        size = path.stat().st_size
-        start, end = 0, size - 1
-        m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", ""))
-        if m and (m.group(1) or m.group(2)):
-            if m.group(1):
-                start = int(m.group(1))
-                end = int(m.group(2)) if m.group(2) else size - 1
-            else:
-                start = max(0, size - int(m.group(2)))
-            end = min(end, size - 1)
-            if start > end:
-                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                self.send_header("Content-Range", f"bytes */{size}")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            self.send_response(HTTPStatus.PARTIAL_CONTENT)
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        else:
-            self.send_response(200)
-        self._cors()
-        self.send_header("Content-Type", "video/mp4")
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         try:
-            with path.open("rb") as f:
-                f.seek(start)
-                remaining = end - start + 1
-                while remaining > 0 and (chunk := f.read(min(CHUNK, remaining))):
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
+            self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError):
             pass
-
-
-def _grew(path: Path, sent: int) -> bool:
-    return path.exists() and path.stat().st_size > sent

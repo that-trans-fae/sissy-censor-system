@@ -1,11 +1,19 @@
 """Video censoring jobs: ffmpeg decode -> detect on sampled frames -> blur ->
-ffmpeg encode to fragmented MP4, written to disk as it is produced so
-playback can start before the job finishes.
+ffmpeg encode to fixed-length fragmented MP4 segments, written to disk as
+they are produced so playback can start before the job finishes.
 
 ffmpeg reads plain files, HLS and DASH natively, so one pipeline covers all
 three. Boxes found on a sampled frame are applied to every frame up to the
 next sample, together with that sample's boxes, so motion between samples
 stays covered (the same idea as GIF frame sampling).
+
+Segments make seeking work while a job runs. Segment n always holds the
+same frames, whichever run produced it. A run (one decoder and encoder)
+starts at a segment and goes on until the end of the video, a segment that
+is already done, or a viewer seeking somewhere it won't reach soon; then the
+job starts a new run where it is needed. Each run's segments carry
+timestamps from 0 and its own init segment, so the page's player is told
+both with each segment.
 """
 
 from __future__ import annotations
@@ -13,8 +21,10 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import math
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -70,8 +80,30 @@ class Job:
     state: str = "queued"
     error: str = ""
     duration: float | None = None
+    # Seconds of video in finished segments.
     seconds_done: float = 0.0
     frames_censored: int = 0
+    # Output layout, set once the source is probed: segment n holds frames
+    # n * segment_frames onwards, segment_seconds long (the last may be
+    # shorter). segments is None while the length is unknown.
+    segment_frames: int = 0
+    segment_seconds: float = 0.0
+    segments: int | None = None
+    audio: bool = False
+    # The MSE type's codecs parameter, read from the first init segment.
+    codecs: str | None = None
+    # Finished segments, and for each the run that made it: (run number,
+    # first segment). A run's segments use its init segment, and their
+    # timestamps start at 0 from its first segment.
+    done: set[int] = field(default_factory=set)
+    run_of: dict[int, tuple[int, int]] = field(default_factory=dict)
+    runs: int = 0
+    # The segment the current run is producing (None between runs) and the
+    # one it started at, and the segment to restart at, when a viewer
+    # seeked somewhere the run won't reach soon.
+    position: int | None = None
+    run_first: int = 0
+    restart_at: int | None = None
     # Video time judged to be in a male stretch (video_attribution).
     seconds_male: float = 0.0
     created: float = field(default_factory=time.time)
@@ -83,21 +115,85 @@ class Job:
     # Set to stop the job (page closed, or preempted); the pump checks it.
     cancel_reason: str = ""
     finished: float | None = None
-    path: Path | None = None
+    # Output directory: init-<run>.mp4 and seg-<n>.m4s.
+    out_dir: Path | None = None
     changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
     def status(self, ready_seconds: float) -> dict:
-        ready = self.state == "done" or (self.state == "running" and self.seconds_done >= ready_seconds)
-        return {
-            "id": self.id,
-            "state": self.state,
-            "ready": ready,
-            "error": self.error,
-            "duration": self.duration,
-            "seconds_done": round(self.seconds_done, 1),
-            "frames_censored": self.frames_censored,
-            "seconds_male": round(self.seconds_male, 1),
-        }
+        with self.changed:
+            first = 0
+            while first in self.done:
+                first += 1
+            ready = self.state == "done" or (self.state == "running" and self.codecs is not None
+                                             and first * self.segment_seconds >= ready_seconds)
+            return {
+                "id": self.id,
+                "state": self.state,
+                "ready": ready,
+                "error": self.error,
+                "duration": self.duration,
+                "seconds_done": round(self.seconds_done, 1),
+                "frames_censored": self.frames_censored,
+                "seconds_male": round(self.seconds_male, 1),
+                "segment_seconds": self.segment_seconds,
+                "segments": self.segments,
+                "codecs": self.codecs,
+            }
+
+    def segment_path(self, n: int) -> Path:
+        return self.out_dir / f"seg-{n:05d}.m4s"
+
+    def init_path(self, run: int) -> Path:
+        return self.out_dir / f"init-{run}.mp4"
+
+    def check(self, n: int) -> bool:
+        """Whether segment n is finished, noticing one the encoder has just
+        written (it renames each segment into place once complete)."""
+        with self.changed:
+            if n in self.done:
+                return True
+            if self.out_dir is None or n not in self.run_of or not self.segment_path(n).exists():
+                return False
+            self.done.add(n)
+            self.seconds_done = len(self.done) * self.segment_seconds
+            if self.duration:
+                self.seconds_done = min(self.seconds_done, self.duration)
+            if self.codecs is None:
+                self.codecs = _codecs(self.init_path(self.run_of[n][0]), self.audio)
+            self.changed.notify_all()
+            return True
+
+    def first_missing(self, after: int = 0) -> int | None:
+        """The first unfinished segment from `after` on, else from the
+        start; None when every segment is done."""
+        if self.segments is None:
+            return None if self.check(after) else after
+        for n in [*range(after, self.segments), *range(0, min(after, self.segments))]:
+            if not self.check(n):
+                return n
+        return None
+
+    def seek(self, n: int, wait_segments: int) -> None:
+        """A viewer needs segment n. Unless the current run will get there
+        within wait_segments, restart the job there."""
+        with self.changed:
+            if n in self.done or self.segments is None or not 0 <= n < self.segments:
+                return
+            # Everything from the run's first segment to its position has been
+            # fed to the encoder, which writes a segment out only once it
+            # has the next one's first frame.
+            p = self.position
+            if p is not None and self.run_first <= n <= p + wait_segments:
+                return
+            if self.restart_at != n:
+                log.debug("video %s: seek to segment %d (at %s)", self.id, n, p)
+                self.restart_at = n
+                self.changed.notify_all()
+
+    def take_restart(self) -> int | None:
+        with self.changed:
+            n, self.restart_at = self.restart_at, None
+            return n
 
     def touch(self, active: bool = False) -> None:
         self.last_seen = time.time()
@@ -127,7 +223,8 @@ class Job:
             self.changed.notify_all()
 
 
-_OUTPUT_NAME = re.compile(r"[0-9a-f]{24}-\d+\.mp4")
+# Output directories, and the single files earlier versions wrote.
+_OUTPUT_NAME = re.compile(r"[0-9a-f]{24}-\d+(\.mp4)?")
 
 
 class VideoJobs:
@@ -142,7 +239,7 @@ class VideoJobs:
         # see them. Only our own file names, in case cache_dir is shared.
         for f in self.dir.iterdir():
             if _OUTPUT_NAME.fullmatch(f.name):
-                f.unlink(missing_ok=True)
+                _remove(f)
         self._detector = detector
         self._attribution_detector: Detector | None = None
         self._detector_lock = threading.Lock()
@@ -222,11 +319,11 @@ class VideoJobs:
             queued = sum(j.state == "queued" and not j.cancel_reason for j in self._jobs.values())
             if v.max_queued_jobs and queued >= v.max_queued_jobs:
                 raise JobRefused(f"{queued} videos are already waiting; try again later")
-            # Own file per attempt: a cancelled run may still be shutting down.
+            # Own directory per attempt: a cancelled run may still be shutting down.
             self._attempts += 1
             id_ = self._ids[key] = secrets.token_hex(12)
             job = Job(id_, src, origin + "/" if origin else None, user_agent, page=page,
-                      path=self.dir / f"{id_}-{self._attempts}.mp4")
+                      out_dir=self.dir / f"{id_}-{self._attempts}")
             self._jobs[id_] = job
         threading.Thread(target=self._run, args=(job,), name=f"video-{id_[:8]}", daemon=True).start()
         return job
@@ -291,9 +388,9 @@ class VideoJobs:
     def _fail(self, job: Job, error: str) -> None:
         log.warning("video failed %s: %s", job.id, error)
         job.update(state="error", error=error, finished=time.time())
-        # Failed output is never served; a stream already open has what it got.
-        if job.path:
-            job.path.unlink(missing_ok=True)
+        # Failed output is never served; a player keeps what it already has.
+        if job.out_dir:
+            _remove(job.out_dir)
 
     def _evict(self) -> None:
         """Delete the oldest finished outputs until the cache fits."""
@@ -301,14 +398,28 @@ class VideoJobs:
         with self._lock:
             done = sorted((j for j in self._jobs.values() if j.state in ("done", "error")),
                           key=lambda j: j.finished or 0)
-            total = sum(j.path.stat().st_size for j in done if j.path and j.path.exists())
+            sizes = {j.id: _size(j.out_dir) for j in done}
+            total = sum(sizes.values())
             for j in done:
                 if total <= limit:
                     break
-                if j.path and j.path.exists():
-                    total -= j.path.stat().st_size
-                    j.path.unlink()
+                if j.out_dir:
+                    total -= sizes[j.id]
+                    _remove(j.out_dir)
                 del self._jobs[j.id]
+
+
+def _size(path: Path | None) -> int:
+    if not path or not path.is_dir():
+        return 0
+    return sum(f.stat().st_size for f in path.iterdir() if f.is_file())
+
+
+def _remove(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
 
 
 def check_source(src: str, allow_private: bool = False) -> None:
@@ -388,52 +499,115 @@ def output_size(p: Probe, max_height: int) -> tuple[int, int]:
     return w - w % 2, h - h % 2
 
 
+
+
+def _codecs(init: Path, audio: bool) -> str | None:
+    """The MSE codecs parameter for an init segment: avc1.PPCCLL from its
+    avcC box, and AAC-LC when there is audio."""
+    try:
+        data = init.read_bytes()
+    except OSError:
+        return None
+    i = data.find(b"avcC")
+    if i < 0 or len(data) < i + 8:
+        return None
+    video = f"avc1.{data[i + 5]:02x}{data[i + 6]:02x}{data[i + 7]:02x}"
+    return f"{video},mp4a.40.2" if audio else video
+
+
+class _Seek(Exception):
+    """A viewer seeked where the current run won't get to soon."""
+
+
 def censor_video(job: Job, cfg: Config, detector: Detector,
                  attribution_detector: Detector | None = None) -> None:
-    """Censor job.src into job.path. With an attribution detector (and
-    video_attribution on), a second decode at its sample rate decides which
-    stretches are male; see attribution.py."""
+    """Censor job.src into segments in job.out_dir, one run after another
+    until every segment is done. With an attribution detector (and
+    video_attribution on), each run also decodes a second time at its
+    sample rate to decide which stretches are male; see attribution.py."""
     vcfg = cfg.video
     p = probe(job, vcfg.source_protocols)
     if p.duration and p.duration > vcfg.max_duration_seconds:
         raise VideoError(f"video is {p.duration:.0f}s, over the {vcfg.max_duration_seconds}s limit")
-    job.update(duration=p.duration)
     w, h = output_size(p, vcfg.max_height)
     fps = min(p.fps, vcfg.max_fps)
     step = max(1, round(fps / vcfg.sample_fps))
-    frame_bytes = w * h * 3
+    # A whole number of samples per segment, so every segment starts on a
+    # sampled frame and a run can stop there with its boxes settled.
+    seg = step * max(1, round(vcfg.segment_seconds * fps / step))
+    job.update(duration=p.duration, segment_frames=seg, segment_seconds=seg / fps,
+               segments=max(1, math.ceil(p.duration * fps / seg - 1e-6)) if p.duration else None,
+               audio=vcfg.audio and p.audio_index is not None)
+    job.out_dir.mkdir(parents=True, exist_ok=True)
+    start = job.take_restart() or 0
+    while start is not None:
+        start = _censor_run(job, start, p, w, h, fps, step, cfg, detector, attribution_detector)
 
+
+def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step: int,
+                cfg: Config, detector: Detector, attribution_detector: Detector | None) -> int | None:
+    """One run, from segment `first`. Returns the segment the next run
+    starts at, or None when every segment is done."""
+    vcfg = cfg.video
+    seg = job.segment_frames
+    t0 = first * job.segment_seconds
+    with job.changed:
+        job.runs += 1
+        run = job.runs
     net = _net_args(job, vcfg.source_protocols)
-    decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, "-i", job.src,
+    seek = ["-ss", f"{t0:.6f}"] if first else []
+    decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *seek, "-i", job.src,
                   "-map", f"0:{p.video_index}", "-vf", f"scale={w}:{h}", "-r", f"{fps:.6g}",
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     encode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", f"{fps:.6g}",
                   "-i", "pipe:0"]
-    if vcfg.audio and p.audio_index is not None:
-        encode_cmd += [*net, "-i", job.src, "-map", "0:v", "-map", f"1:{p.audio_index}",
+    if job.audio:
+        encode_cmd += [*net, *seek, "-i", job.src, "-map", "0:v", "-map", f"1:{p.audio_index}",
                        "-c:a", "aac", "-b:a", "128k", "-shortest"]
     else:
         encode_cmd += ["-map", "0:v"]
     encode_cmd += ["-c:v", "libx264", "-preset", vcfg.preset, "-crf", str(vcfg.crf),
-                   "-pix_fmt", "yuv420p", "-g", str(max(1, round(fps * 2))),
-                   "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
-                   "-f", "mp4", str(job.path)]
+                   "-pix_fmt", "yuv420p",
+                   # Keyframes exactly at segment starts and nowhere else, so
+                   # every run cuts segment n at the same frame. The muxer
+                   # cuts at the first keyframe past each multiple of hls_time.
+                   "-g", str(seg), "-keyint_min", str(seg), "-sc_threshold", "0",
+                   "-force_key_frames", f"expr:eq(mod(n,{seg}),0)",
+                   "-f", "hls", "-hls_segment_type", "fmp4",
+                   "-hls_time", f"{(seg - 0.5) / fps:.6f}", "-hls_list_size", "0",
+                   # Each segment is renamed into place once complete.
+                   "-hls_flags", "temp_file", "-start_number", str(first),
+                   "-hls_fmp4_init_filename", job.init_path(run).name,
+                   "-hls_segment_filename", str(job.out_dir / "seg-%05d.m4s"),
+                   str(job.out_dir / f"run-{run}.m3u8")]
 
     scanner = None
     acfg = cfg.video_attribution
     if attribution_detector and acfg.enabled:
-        scan_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, "-i", job.src,
+        # From history_seconds back, so the run's first moments have their window.
+        scan_t0 = max(0.0, t0 - acfg.history_seconds)
+        scan_seek = ["-ss", f"{scan_t0:.6f}"] if scan_t0 else []
+        scan_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *scan_seek, "-i", job.src,
                     "-map", f"0:{p.video_index}", "-vf", f"fps={acfg.sample_fps:.6g},scale={w}:{h}",
                     "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
-        scanner = Scanner(scan_cmd, w, h, acfg, attribution_detector, name=f"attrib-{job.id[:8]}")
+        scanner = Scanner(scan_cmd, w, h, acfg, attribution_detector,
+                          name=f"attrib-{job.id[:8]}", t0=scan_t0)
 
+    if first:
+        log.info("video %s: run %d from %.1fs", job.id, run, t0)
+    stopped, frames = "seek", 0
     with tempfile.TemporaryFile() as dec_err, tempfile.TemporaryFile() as enc_err:
         timeline = scanner.start() if scanner else None
         dec = subprocess.Popen(decode_cmd, stdout=subprocess.PIPE, stderr=dec_err)
         enc = subprocess.Popen(encode_cmd, stdin=subprocess.PIPE, stderr=enc_err)
         try:
-            _pump(dec.stdout, enc.stdin, w, h, frame_bytes, fps, step, job, cfg, detector, timeline)
+            stopped, frames = _pump(dec.stdout, enc.stdin, w, h, w * h * 3, fps, step, job, cfg,
+                                    detector, timeline, first=first, segment_frames=seg, run=run)
+        except _Seek:
+            # The segment in progress is lost; its temporary file is removed below.
+            for proc in (dec, enc):
+                proc.kill()
         except BaseException:
             # Cancelled or failed: the encoder would otherwise keep reading
             # the audio input from the network before it noticed.
@@ -443,6 +617,8 @@ def censor_video(job: Job, cfg: Config, detector: Detector,
         finally:
             if scanner:
                 scanner.stop()
+            if stopped == "reached":
+                dec.kill()  # the rest of the source isn't needed
             dec.stdout.close()
             for proc in (dec, enc):
                 if proc.stdin:
@@ -451,25 +627,53 @@ def censor_video(job: Job, cfg: Config, detector: Detector,
                     except BrokenPipeError:
                         pass
             enc_rc, dec_rc = enc.wait(timeout=120), dec.wait(timeout=30)
-        if dec_rc != 0:
-            dec_err.seek(0)
-            raise VideoError(f"decode failed: {dec_err.read().decode(errors='replace').strip()[:300]}")
-        if enc_rc != 0:
-            enc_err.seek(0)
-            raise VideoError(f"encode failed: {enc_err.read().decode(errors='replace').strip()[:300]}")
+            job.update(position=None)
+        if stopped == "seek":
+            for f in job.out_dir.glob("*.tmp"):
+                f.unlink(missing_ok=True)
+        else:
+            if stopped == "end" and dec_rc != 0:
+                dec_err.seek(0)
+                raise VideoError(f"decode failed: {dec_err.read().decode(errors='replace').strip()[:300]}")
+            if enc_rc != 0:
+                enc_err.seek(0)
+                raise VideoError(f"encode failed: {enc_err.read().decode(errors='replace').strip()[:300]}")
+
+    last = first + math.ceil(frames / seg)  # one past the last segment this run fed
+    for n in range(first, last):
+        job.check(n)  # the encoder wrote the last ones as it finished
+    if stopped == "end":
+        if not last:
+            raise VideoError("the source has no video frames")
+        if frames and not job.check(first):
+            raise VideoError("the encoder wrote no segments")
+        # The real length; the probe's duration is only an estimate.
+        job.update(segments=last)
+    restart = job.take_restart()
+    if restart is not None and not job.check(restart):
+        return restart
+    return job.first_missing(last if stopped != "seek" else first)
 
 
 def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detector: Detector,
-          timeline: Timeline | None = None) -> None:
+          timeline: Timeline | None = None, first: int = 0, segment_frames: int = 0,
+          run: int = 0) -> tuple[str, int]:
     """Read raw frames, censor, write raw frames. Frames between samples wait
     in `pending` until the next sample's boxes are known. With a timeline,
     each sample first waits for the attribution scan to get far enough ahead,
-    and male stretches use the male detection config."""
+    and male stretches use the male detection config.
+
+    With segment_frames, frame 0 starts segment `first`, and at each segment
+    start the pump stops if that segment is already done, or else claims it
+    for `run`. Returns why it stopped ("end" or "reached") and the frames
+    written; raises _Seek when a viewer seeked elsewhere."""
     pad = cfg.video.padding
     acfg = cfg.video_attribution
     male_cfg = male_detection(cfg.detection, acfg)
+    t0 = first * segment_frames / fps
     pending: list[np.ndarray] = []
     prev_boxes: list[Box] = []
+    unconfirmed: list[int] = []  # segments fed to the encoder, not yet on disk
     index = written = failures = 0
     was_male = scan_failed = False
 
@@ -478,6 +682,8 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
         while not timeline.wait(t + acfg.lookahead_seconds, 0.5):
             if reason := job.stop_reason(cfg.video.abandon_seconds):
                 raise VideoError(reason)
+            if job.restart_at is not None:
+                raise _Seek()
         if timeline.failed and not scan_failed:
             scan_failed = True
             log.warning("video %s: attribution off from %.1fs: %s", job.id, t, timeline.failed)
@@ -487,6 +693,19 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
             was_male = male
         return male
 
+    def segment_start() -> bool:
+        """At the first frame of a segment: claim it, or False to stop
+        because it is already done."""
+        m = first + index // segment_frames
+        if job.check(m):
+            return False
+        if index:
+            unconfirmed.append(m - 1)
+        with job.changed:
+            job.run_of[m] = (run, first)
+            job.position, job.run_first = m, first
+        return True
+
     def flush(frames: list[np.ndarray], boxes: list[Box]) -> None:
         nonlocal written
         for frame in frames:
@@ -494,21 +713,23 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
                 apply_censor(frame, box, cfg.censor)
             dst.write(frame.tobytes())
         written += len(frames)
-        job.update(seconds_done=written / fps,
-                   frames_censored=job.frames_censored + (len(frames) if boxes else 0))
+        job.update(frames_censored=job.frames_censored + (len(frames) if boxes else 0))
 
     while True:
         buf = src.read(frame_bytes)
         if len(buf) < frame_bytes:
             break
         frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3).copy()
-        if index % step == 0 and (reason := job.stop_reason(cfg.video.abandon_seconds)):
-            raise VideoError(reason)
+        if index % step == 0:
+            if reason := job.stop_reason(cfg.video.abandon_seconds):
+                raise VideoError(reason)
+            if job.restart_at is not None:
+                raise _Seek()
         if index % step:
             pending.append(frame)
         else:
             detection = cfg.detection
-            if timeline and attributed_male(index / fps):
+            if timeline and attributed_male(t0 + index / fps):
                 detection = male_cfg
                 job.update(seconds_male=job.seconds_male + step / fps)
             try:
@@ -523,7 +744,11 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
                 # Fail closed: this stretch is covered completely.
                 boxes = [Box(0, 0, w, h)]
             flush(pending, prev_boxes + boxes)
+            if segment_frames and index % segment_frames == 0 and not segment_start():
+                return "reached", written
             flush([frame], prev_boxes + boxes)
             pending, prev_boxes = [], boxes
+            unconfirmed[:] = [m for m in unconfirmed if not job.check(m)]
         index += 1
     flush(pending, prev_boxes)
+    return "end", written

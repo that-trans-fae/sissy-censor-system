@@ -150,6 +150,12 @@ def test_scanner_reads_at_its_own_rate(acfg_cfg, tmp_path):
     assert tl.wait(99, 10) and tl.complete and not tl.failed
     scanner.stop()
     assert tl.complete and fake.calls == 8 and tl.male_at(1.0)
+    # A run restarted mid-video scans from there: evidence at video time.
+    scanner = Scanner(cmd, 64, 48, a, fake, t0=30.0)
+    tl = scanner.start()
+    assert tl.wait(99, 10) and tl.complete
+    scanner.stop()
+    assert tl._times[0] == 30.0 and tl._times[-1] == 31.75
 
 
 @needs_ffmpeg
@@ -167,13 +173,13 @@ def test_censor_video_with_attribution(acfg_cfg, tmp_path):
     src = tmp_path / "in.mp4"
     make_test_video(src)
     breast = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=(100, 80, 60, 60))])
-    job = Job("t", str(src), path=tmp_path / "out.mp4")
+    job = Job("t", str(src), out_dir=tmp_path / "out")
     # A local file, which the default protocol list refuses.
     acfg_cfg = replace(acfg_cfg, video=replace(acfg_cfg.video, source_protocols=(
         *acfg_cfg.video.source_protocols, "file")))
     censor_video(job, acfg_cfg, breast, FakeDetector([det("MALE_GENITALIA_EXPOSED", 0.9)]))
     assert job.frames_censored == 0 and job.seconds_male == pytest.approx(2.0)
-    job = Job("t", str(src), path=tmp_path / "out2.mp4")
+    job = Job("t", str(src), out_dir=tmp_path / "out2")
     censor_video(job, acfg_cfg, breast, FakeDetector([det("MALE_GENITALIA_EXPOSED", 0.9),
                                                        det("FACE_FEMALE", 0.9)]))
     assert job.frames_censored == 20 and job.seconds_male == 0

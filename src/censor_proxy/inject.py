@@ -2,7 +2,8 @@
 extend the page's Content-Security-Policy just enough to let it run.
 
 CSP is extended, never removed: our origin is added to script-src,
-media-src and connect-src (or default-src when those are absent). When the
+media-src and connect-src (or default-src when those are absent), and
+blob: to media-src for the censored player's MediaSource. When the
 policy relies on nonces, hashes or 'strict-dynamic', host allowlisting is
 ignored by the browser, so the script also gets a fresh nonce. A nonce is
 not added otherwise, because its presence would disable a policy's
@@ -66,6 +67,14 @@ def extend_policy(policy: str, origin: str, nonce: str) -> tuple[str, bool]:
         if name.startswith("script-src") and _needs_nonce(sources):
             target.append(f"'nonce-{nonce}'")
             use_nonce = True
+    # The censored player plays a MediaSource, whose URL is blob:. Given to
+    # media-src alone: on default-src it would allow blob: scripts too.
+    media = by_name.get("media-src")
+    if media is None and "default-src" in by_name:
+        media = ["media-src", *by_name["default-src"][1:]]
+        directives.append(media)
+    if media is not None and "blob:" not in media[1:]:
+        media.append("blob:")
     return "; ".join(" ".join(d) for d in directives), use_nonce
 
 

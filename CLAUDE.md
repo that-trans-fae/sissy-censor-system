@@ -96,7 +96,9 @@ to allow it. The script covers and pauses every `<video>` (patching
 click, posts the source URL to `/video/jobs`. Only full documents and
 iframes are injected (`Sec-Fetch-Dest`), never fetched HTML fragments. The addon routes
 `censor.local` to the internal server on `proxy.internal_port`; jobs run
-ffmpeg in `video.py` and stream fragmented MP4 back while they run. Job
+ffmpeg in `video.py` and write fixed-length fMP4 segments, which the
+script plays through Media Source Extensions while the job runs. A seek
+past what is done restarts the job at that segment (`Job.seek()`). Job
 requests are only accepted from origins matching `video.hosts`, and only
 for public addresses (`video.allow_private_sources` relaxes that). See
 `docs/video-design.md`.

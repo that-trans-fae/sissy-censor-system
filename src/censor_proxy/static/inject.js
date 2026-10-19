@@ -740,7 +740,7 @@
         await new Promise((r) => setTimeout(r, 1000));
         job = await (await origFetch.call(window, statusUrl(state))).json();
       }
-      play(video, state, job.id);
+      play(video, state, job);
     } catch (e) {
       report("failed", { error: String(e && e.message || e) });
       show(state, "failed", String(e && e.message || e).slice(0, 80));
@@ -780,9 +780,17 @@
   addEventListener("pagehide", () => guarded.forEach(release));
   document.addEventListener("visibilitychange", () => guarded.forEach(beat));
 
-  function play(video, state, id) {
-    const url = ORIGIN + "/video/" + id + "/stream";
+  function play(video, state, job) {
     const player = document.createElement("video");
+    let stopped = false;
+    const stop = (why) => {
+      if (stopped) return;
+      stopped = true;
+      player.pause();
+      player.remove();
+      state.player = null;
+      show(state, "failed", why);
+    };
     const timer = setInterval(() => {
       if (!player.isConnected) return clearInterval(timer);
       beat(state);
@@ -791,29 +799,200 @@
     // Resuming after the proxy stopped the job (paused while another video
     // waited) would just run out where the job stopped; say so instead.
     player.addEventListener("play", async () => {
-      const job = await beat(state);
-      if (job && job.state === "error" && player.isConnected) {
-        player.pause();
-        player.remove();
-        state.player = null;
-        show(state, "failed", job.error.replace(/^\w+: /, ""));
-      }
+      const now = await beat(state);
+      if (now && now.state === "error") stop(now.error.replace(/^\w+: /, ""));
     });
     ours.add(player);
     player.controls = true;
     player.playsInline = true;
     player.muted = video.muted;
-    player.src = url;
     player.addEventListener("error", () => {
-      report("player-error", { code: player.error && player.error.code, url });
-      player.remove();
-      state.player = null;
-      show(state, "failed");
+      report("player-error", { code: player.error && player.error.code, id: job.id });
+      stop();
     });
+    if (!stream(player, job, stop)) return stop("This browser can't play the censored copy.");
     state.card.appendChild(player);
     state.player = player;
     show(state, "playing");
     player.play().catch(() => { /* autoplay refused; controls let the user start it */ });
+  }
+
+  // ---- Feeding the player ------------------------------------------------
+  // The proxy cuts the censored copy into segments (video.segment_seconds)
+  // and the player plays them through Media Source Extensions, fetched a
+  // little ahead of the playhead. Seeking past what is buffered fetches
+  // from there; the proxy restarts the job at that point unless it is
+  // about to get there anyway, and the player waits meanwhile.
+  const AHEAD_S = 30;   // buffer this far ahead of the playhead
+  const BEHIND_S = 30;  // and let go of what is further behind
+  const GAP_S = 0.5;    // step over gaps this small (where two runs of the job meet)
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function stream(player, job, stop) {
+    const type = 'video/mp4; codecs="' + job.codecs + '"';
+    if (!window.MediaSource || !job.codecs || !MediaSource.isTypeSupported(type)) return false;
+    const base = ORIGIN + "/video/" + job.id;
+    const seg = job.segment_seconds;
+    const ms = new MediaSource();
+    let sb = null;
+    let init = null;        // the run whose init segment the buffer has
+    let next = 0;           // the segment to fetch next
+    let end = job.segments; // segment count, once known
+    let gen = 0;            // bumped by seeks; work for an older one is dropped
+    let ctrl = null;        // aborts the fetch in flight
+
+    // Run one SourceBuffer operation and wait for it to finish.
+    const update = (op) => new Promise((resolve, reject) => {
+      const done = (e) => {
+        sb.removeEventListener("updateend", done);
+        sb.removeEventListener("error", done);
+        e.type === "error" ? reject(new Error("the player refused a segment")) : resolve();
+      };
+      sb.addEventListener("updateend", done);
+      sb.addEventListener("error", done);
+      try { op(); } catch (e) {
+        sb.removeEventListener("updateend", done);
+        sb.removeEventListener("error", done);
+        reject(e);
+      }
+    });
+
+    // Where the buffered stretch around t ends (small gaps don't count), or
+    // null when t isn't buffered.
+    function bufferedEnd(t) {
+      const b = sb.buffered;
+      let e = null;
+      for (let i = 0; i < b.length; i++) {
+        if (e === null ? b.start(i) - GAP_S <= t && t < b.end(i) : b.start(i) - e <= GAP_S) e = b.end(i);
+        else if (e !== null) break;
+      }
+      return e;
+    }
+
+    function buffered(n) {
+      const lo = n * seg, hi = Math.min((n + 1) * seg, ms.duration || Infinity);
+      const b = sb.buffered;
+      for (let i = 0; i < b.length; i++) {
+        if (b.start(i) <= lo + 0.25 && b.end(i) >= hi - 0.25) return true;
+      }
+      return false;
+    }
+
+    function onSeek() {
+      const t = player.currentTime;
+      const e = bufferedEnd(t);
+      const n = e === null ? Math.floor(t / seg) : Math.round(e / seg);
+      if (n === next) return;
+      next = n;
+      gen++;
+      if (ctrl) ctrl.abort();
+    }
+
+    // Stalled just before the next buffered stretch: step over the gap.
+    function jumpGap() {
+      if (!sb || player.seeking || player.paused || player.readyState >= 3) return;
+      const t = player.currentTime, b = sb.buffered;
+      for (let i = 0; i < b.length; i++) {
+        if (b.start(i) <= t && t < b.end(i) - 0.1) return;
+        if (b.start(i) > t && b.start(i) - t <= GAP_S) {
+          player.currentTime = b.start(i) + 0.01;
+          return;
+        }
+      }
+    }
+
+    async function append(data) {
+      for (;;) {
+        try {
+          return await update(() => sb.appendBuffer(data));
+        } catch (e) {
+          if (e.name !== "QuotaExceededError") throw e;
+          // Full: let go of more of what has been played, then wait for the playhead.
+          const t = player.currentTime;
+          if (t > 5 && sb.buffered.length && sb.buffered.start(0) < t - 5) {
+            await update(() => sb.remove(0, t - 5));
+          }
+          await sleep(1000);
+        }
+      }
+    }
+
+    async function fetchSegment(n, g) {
+      ctrl = new AbortController();
+      const res = await origFetch.call(window, base + "/segment/" + n, { signal: ctrl.signal });
+      if (res.status === 202) return null;  // not done yet; ask again
+      if (res.status === 204) {             // past the end
+        end = n;
+        return null;
+      }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "HTTP " + res.status);
+      const run = res.headers.get("X-Init"), offset = Number(res.headers.get("X-Offset"));
+      const data = await res.arrayBuffer();
+      if (g !== gen) return null;
+      if (run !== init) {
+        const r = await origFetch.call(window, base + "/init/" + run, { signal: ctrl.signal });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const bytes = await r.arrayBuffer();
+        if (g !== gen) return null;
+        await update(() => sb.appendBuffer(bytes));
+        init = run;
+      }
+      return { data, offset };
+    }
+
+    async function loop() {
+      let failures = 0;
+      while (player.isConnected) {
+        jumpGap();
+        const t = player.currentTime;
+        if (end !== null && next >= end) {
+          if (ms.readyState === "open" && !sb.updating) ms.endOfStream();
+          await sleep(250);
+          continue;
+        }
+        if (buffered(next)) {
+          next++;
+          continue;
+        }
+        if (next * seg > t + AHEAD_S) {
+          await sleep(250);
+          continue;
+        }
+        const n = next, g = gen;
+        try {
+          const got = await fetchSegment(n, g);
+          failures = 0;
+          if (!got) continue;
+          const b = sb.buffered;
+          if (b.length && b.start(0) < t - BEHIND_S - seg) await update(() => sb.remove(0, t - BEHIND_S));
+          sb.timestampOffset = got.offset;  // each run's timestamps start at 0
+          await append(got.data);
+          if (g === gen) next = n + 1;
+        } catch (e) {
+          if (e.name === "AbortError") continue;  // a seek; start over from there
+          if (e instanceof TypeError && ++failures < 5) {  // network trouble
+            await sleep(1000);
+            continue;
+          }
+          throw e;
+        }
+      }
+    }
+
+    ms.addEventListener("sourceopen", () => {
+      URL.revokeObjectURL(player.src);
+      sb = ms.addSourceBuffer(type);
+      if (job.duration) ms.duration = job.duration;
+      player.addEventListener("seeking", onSeek);
+      player.addEventListener("waiting", jumpGap);
+      loop().catch((e) => {
+        report("stream-error", { error: String(e && e.message || e), id: job.id });
+        stop(String(e && e.message || e).slice(0, 80));
+      });
+    }, { once: true });
+    player.src = URL.createObjectURL(ms);
+    return true;
   }
 
   watch(document);

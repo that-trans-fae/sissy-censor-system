@@ -21,7 +21,21 @@ def test_default_src_fallback_extended_once():
 
 def test_none_replaced():
     p, _ = extend_policy("media-src 'none'", O, "N")
-    assert directives(p)["media-src"] == [O]
+    assert directives(p)["media-src"] == [O, "blob:"]
+
+
+def test_media_src_allows_blob_for_the_player():
+    # The censored player plays a MediaSource (a blob: URL).
+    p, _ = extend_policy("media-src 'self' blob:", O, "N")
+    assert directives(p)["media-src"] == ["'self'", "blob:", O]
+    # From default-src it gets its own media-src: blob: on default-src
+    # would let blob: scripts run too.
+    p, _ = extend_policy("default-src 'self'", O, "N")
+    d = directives(p)
+    assert d["default-src"] == ["'self'", O] and d["media-src"] == ["'self'", O, "blob:"]
+    # No policy for media: nothing to add.
+    p, _ = extend_policy("script-src 'self'", O, "N")
+    assert "media-src" not in directives(p)
 
 
 def test_strict_dynamic_gets_nonce():
@@ -100,5 +114,5 @@ def test_reddit_style_nonce_policy():
     d = directives(p)
     assert nonce and d["script-src"] == ["'nonce-abc'", O, "'nonce-N'"]
     # media-src and connect-src fall back to default-src, which no longer blocks us
-    assert d["default-src"] == [O]
+    assert d["default-src"] == [O] and d["media-src"] == [O, "blob:"]
     assert d["style-src"] == ["'unsafe-inline'"] and d["img-src"] == ["https://www.redditstatic.com"]

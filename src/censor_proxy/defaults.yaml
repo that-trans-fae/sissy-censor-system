@@ -265,6 +265,13 @@ video:
   crf: 23
   # Seconds of censored video to have ready before playback starts.
   ready_seconds: 3
+  # Length of the segments the censored copy is cut into. The player can
+  # seek to any segment; one that isn't done yet restarts the job there.
+  segment_seconds: 4
+  # Seeking ahead of the job waits for it when it is at most this many
+  # seconds of video from the target; further, the job restarts there
+  # (a restart costs a few seconds while ffmpeg reopens the source).
+  seek_wait_seconds: 10
   # Longer videos are refused (they stay covered).
   max_duration_seconds: 1800
   # Jobs beyond this wait in a queue ("Waiting for another video").
