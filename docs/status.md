@@ -46,8 +46,8 @@ Last updated Oct 18, 2026.
   a queue cap and per-origin rate limit on job starts, and an ffmpeg
   protocol whitelist. Tested with pytest only, not yet in a browser
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
-  status, detection log, video jobs, domain whitelist (`youtube.com` in the
-  example config), censoring levels (strict, lax, custom; any number of
+  status, detection log, video jobs, whitelist (built-in hosts, YouTube
+  included, plus your own domains), censoring levels (strict, lax, custom; any number of
   presets), a Fast/Slow image model switch, every setting editable in custom
   and applied live, and an optional PIN lock that reports wrong entries
   instead of locking out. Checked in a browser against a test container (whitelist, settings,

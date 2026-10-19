@@ -141,7 +141,8 @@ def _passed_through(cfg, host):
     "us.archive.ubuntu.com", "security.ubuntu.com", "api.snapcraft.io",
     "fastly.cdn.snapcraftcontent.com", "download.windowsupdate.com", "swcdn.apple.com",
     "www.crunchyroll.com", "www.disneyplus.com", "ipv4-c001.nflxvideo.net", "play.max.com",
-    "tv.apple.com", "pluto.tv",
+    "tv.apple.com", "pluto.tv", "www.youtube.com", "m.youtube.com", "www.youtube-nocookie.com",
+    "youtu.be", "i.ytimg.com", "rr3---sn-a5mekn7s.googlevideo.com",
 ])
 def test_builtin_whitelist_covers(make_config, host):
     assert _passed_through(make_config(), host)
@@ -155,7 +156,7 @@ def test_builtin_whitelist_covers(make_config, host):
     "chase.com.example.net", "notchase.com", "gov.example.com", "edu.example.net",
     "gov.uk.example.com", "edu.au.example.net", "mychartxyz.com", "www.ubuntu.com",
     "launchpad.net", "snapcraft.io", "www.amazon.com", "m.media-amazon.com",
-    "www.apple.com",
+    "www.apple.com", "notyoutube.com", "youtube.com.example.net",
 ])
 def test_builtin_whitelist_leaves_image_hosts(make_config, host):
     assert not _passed_through(make_config(), host)

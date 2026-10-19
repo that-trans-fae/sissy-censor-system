@@ -82,9 +82,9 @@ keys are rejected at startup.
 - The port is bound to loopback only. Don't expose it to your network.
 - Whitelisted hosts bypass interception entirely: the built-in list covers
   browser and OS updates, sign-in, password managers, payments, banks,
-  health sites, streaming services, .gov/.mil/.edu, gov.uk and edu.au; add
-  your own from the
-  admin panel's Whitelist tab (`whitelist.domains`).
+  health sites, streaming services and YouTube, .gov/.mil/.edu, gov.uk and
+  edu.au; add your own from the admin panel's Whitelist tab
+  (`whitelist.domains`).
 - Video injection extends every page's Content-Security-Policy to allow the
   injected script, and lets pages ask the proxy to fetch public video URLs
   (capped by `video.max_queued_jobs` and, per page origin,

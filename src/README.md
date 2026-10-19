@@ -92,9 +92,9 @@ Windows, Apple), sign-in providers, password managers, payment processors,
 banks, brokerages and credit bureaus (US, UK, Australia, Canada), health
 portals (MyChart), insurers, pharmacies and labs, streaming services
 (Netflix, Disney+, Hulu, Max, Prime Video, Paramount+, Peacock, Crunchyroll,
-HIDIVE, Apple TV+ and others), and every `.gov`, `.mil`,
+HIDIVE, Apple TV+ and others) and YouTube, and every `.gov`, `.mil`,
 `.edu`, `gov.uk` and `edu.au` site. Add your own (your bank, health portal,
-employer or university sign-in, `youtube.com`) as plain domains
+employer or university sign-in) as plain domains
 in `whitelist.domains`, from the panel's Whitelist tab; they cover their
 subdomains and are added to the built-in list, while setting `builtin` itself
 replaces it. By default what a whitelisted page loads from other hosts passes
@@ -170,7 +170,7 @@ Tabs:
   closed...), the model and the log level.
 - **Whitelist**: the [whitelist](#whitelist). Add or remove your domains;
   the built-in list is shown read-only below them. The checkbox is
-  `whitelist.match_referer`. `youtube.com` is in the example config.
+  `whitelist.match_referer`.
 - **Detections**: the latest entries of the detection log, filterable. No
   images, just hosts, labels and scores.
 - **Video**: video jobs with their progress, and a button to cancel them.
