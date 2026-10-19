@@ -105,6 +105,15 @@ def test_pump_stops_when_nobody_is_watching(cfg):
         _pump(src, io.BytesIO(), w, h, w * h * 3, 10.0, 4, job, cfg, FakeDetector())
 
 
+def test_startup_clears_earlier_outputs_only(cfg, tmp_path):
+    old = tmp_path / f"{'a' * 24}-3.mp4"
+    other = tmp_path / "holiday.mp4"
+    old.write_bytes(b"x")
+    other.write_bytes(b"x")
+    VideoJobs(replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path))), FakeDetector())
+    assert not old.exists() and other.exists()
+
+
 def test_abandoned_queued_job_never_runs(cfg, tmp_path, monkeypatch):
     cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path)))
     jobs = VideoJobs(cfg, FakeDetector())

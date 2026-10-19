@@ -118,6 +118,9 @@ def job_id(src: str) -> str:
     return hashlib.sha256(src.encode()).hexdigest()[:24]
 
 
+_OUTPUT_NAME = re.compile(r"[0-9a-f]{24}-\d+\.mp4")
+
+
 class VideoJobs:
     """Starts, deduplicates and caches jobs. Thread-safe."""
 
@@ -126,6 +129,11 @@ class VideoJobs:
         vcfg = cfg.video
         self.dir = Path(vcfg.cache_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
+        # Outputs from an earlier run aren't tracked, so eviction would never
+        # see them. Only our own file names, in case cache_dir is shared.
+        for f in self.dir.iterdir():
+            if _OUTPUT_NAME.fullmatch(f.name):
+                f.unlink(missing_ok=True)
         self._detector = detector
         self._detector_lock = threading.Lock()
         self._jobs: dict[str, Job] = {}

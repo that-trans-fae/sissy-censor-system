@@ -281,7 +281,7 @@ video:
   # the proxy to reach the local network; turn on for a LAN media server.
   allow_private_sources: false
   # Censored outputs, reused when the same video is played again. Oldest
-  # are deleted beyond cache_max_bytes.
+  # are deleted beyond cache_max_bytes, and all are cleared at startup.
   cache_dir: /tmp/censor-video
   cache_max_bytes: 2147483648
   # Name shown on the injected control; its look is set in static/inject.js.
