@@ -40,6 +40,11 @@ Last updated Oct 18, 2026.
 - Queue bypass: images that need no detection (small, unsupported, cached),
   and text bodies whose data URIs are all such images, no longer wait for a
   detection worker
+- Page-facing hardening (Oct 19, 2026): no CORS on `/health` and
+  `/inject.js`, job endpoints answer only allowlisted origins, no named
+  global or script tag left in the page, Referer from the `Origin` header,
+  a queue cap and per-origin rate limit on job starts, and an ffmpeg
+  protocol whitelist. Tested with pytest only, not yet in a browser
 - Admin panel at `http://localhost:8082/admin` and `https://scs.local/admin`:
   status, detection log, video jobs, domain whitelist (`youtube.com` in the
   example config), censoring levels (strict, lax, custom; any number of
@@ -74,7 +79,8 @@ Last updated Oct 18, 2026.
   see `docs/handoff-video-attribution.md`
 
 - **Security warning**: tell the user that video injection extends every
-  page's CSP and lets pages ask the proxy to fetch public video URLs
+  page's CSP and lets pages ask the proxy to fetch public video URLs (now
+  rate-limited and capped; see `docs/decisions.md`, "Page-facing surface")
 
 ## Later phases (from the handoff)
 

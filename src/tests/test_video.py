@@ -13,7 +13,7 @@ import pytest
 from conftest import FakeDetector, det
 
 from censor_proxy.server import InternalServer
-from censor_proxy.video import (Job, Probe, VideoError, VideoJobs, _net_args, _pump,
+from censor_proxy.video import (Job, JobRefused, Probe, VideoError, VideoJobs, _net_args, _pump,
                                 censor_video, check_source, output_size)
 
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
@@ -34,6 +34,8 @@ def test_net_args_send_browser_like_requests():
                               "-seekable", "0", "-http_seekable", "0"]
     # Files stay seekable: an MP4 with its index at the end needs it.
     assert _net_args(Job("t", "https://cdn.example/v.mp4?x.m3u8")) == []
+    # The protocol whitelist goes first (it must precede -i).
+    assert _net_args(job, ("https", "http"))[:2] == ["-protocol_whitelist", "https,http"]
 
 
 def run_pump(cfg, n, detections_per_call, step=4, w=64, h=48):
@@ -85,6 +87,8 @@ def make_test_video(path: Path, seconds=2, audio=True):
 def test_censor_video_end_to_end(cfg, tmp_path):
     src = tmp_path / "in.mp4"
     make_test_video(src)
+    # A local file, which the default protocol list refuses.
+    cfg = replace(cfg, video=replace(cfg.video, source_protocols=(*cfg.video.source_protocols, "file")))
     job = Job("t", str(src), path=tmp_path / "out.mp4")
     fake = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=(100, 80, 60, 60))])
     censor_video(job, cfg, fake)
@@ -131,6 +135,59 @@ def test_censor_video_rejects_unreadable_source(cfg, tmp_path):
         censor_video(job, cfg, FakeDetector())
 
 
+@needs_ffmpeg
+def test_local_files_refused_by_protocol_whitelist(cfg, tmp_path):
+    # check_source refuses file: URLs up front; this is the backstop for
+    # what a playlist references once ffmpeg is reading it.
+    src = tmp_path / "in.mp4"
+    make_test_video(src)
+    job = Job("t", str(src), path=tmp_path / "out.mp4")
+    with pytest.raises(VideoError, match="cannot read source.*whitelist"):
+        censor_video(job, cfg, FakeDetector())
+    assert not job.path.exists()
+
+
+def test_start_takes_referer_from_origin_not_page(cfg, tmp_path, monkeypatch):
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path)))
+    jobs = VideoJobs(cfg, FakeDetector())
+    monkeypatch.setattr("censor_proxy.video.censor_video", lambda *a: None)
+    job = jobs.start("https://93.184.215.14/v.mp4", "https://www.reddit.com", "UA/1",
+                     page="https://www.reddit.com/r/x/comments/1")
+    assert job.referer == "https://www.reddit.com/" and job.page == "https://www.reddit.com/r/x/comments/1"
+    assert jobs.start("https://93.184.215.14/w.mp4").referer is None
+
+
+def test_queue_cap_refuses_further_jobs(cfg, tmp_path, monkeypatch):
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path), max_concurrent_jobs=1,
+                                     max_queued_jobs=1))
+    jobs = VideoJobs(cfg, FakeDetector())
+    release = threading.Event()
+    monkeypatch.setattr("censor_proxy.video.censor_video", lambda *a: release.wait(5))
+    running = jobs.start("https://93.184.215.14/a.mp4")
+    for _ in range(40):
+        if running.state == "running":
+            break
+        time.sleep(0.05)
+    assert running.state == "running"
+    waiting = jobs.start("https://93.184.215.14/b.mp4")
+    assert waiting.state == "queued"
+    with pytest.raises(JobRefused, match="already waiting"):
+        jobs.start("https://93.184.215.14/c.mp4")
+    assert jobs.start("https://93.184.215.14/b.mp4") is waiting  # a known job is never refused
+    release.set()
+
+
+def test_rate_limit_is_per_origin(cfg, tmp_path, monkeypatch):
+    cfg = replace(cfg, video=replace(cfg.video, cache_dir=str(tmp_path), max_starts_per_minute=2))
+    jobs = VideoJobs(cfg, FakeDetector())
+    monkeypatch.setattr("censor_proxy.video.censor_video", lambda *a: None)
+    jobs.start("https://93.184.215.14/a.mp4", "https://a.example")
+    jobs.start("https://93.184.215.14/a.mp4", "https://a.example")  # repeats count too
+    with pytest.raises(JobRefused, match="too many"):
+        jobs.start("https://93.184.215.14/b.mp4", "https://a.example")
+    jobs.start("https://93.184.215.14/b.mp4", "https://b.example")
+
+
 @pytest.mark.parametrize("src", [
     "file:///etc/passwd", "ftp://example.com/v.mp4", "http://127.0.0.1:8081/health",
     "http://localhost/v.mp4", "http://192.168.1.1/v.mp4", "http://[::1]/v.mp4", "http://10.0.0.5/x.m3u8",
@@ -163,9 +220,14 @@ def get(url, headers=None):
 
 def test_server_health_and_inject_js(server):
     srv, _, base = server
-    assert json.loads(get(base + "/health")[2]) == {"ready": True}
-    status, headers, body = get(base + "/inject.js")
+    status, headers, body = get(base + "/health", {"Origin": "https://www.reddit.com"})
+    assert json.loads(body) == {"ready": True}
+    # Never readable cross-origin: a page can't use it to tell the proxy is there.
+    assert "Access-Control-Allow-Origin" not in headers
+    status, headers, body = get(base + "/inject.js", {"Origin": "https://www.reddit.com"})
+    assert "Access-Control-Allow-Origin" not in headers
     assert headers["Content-Type"].startswith("text/javascript")
+    assert b"__censorProxy" not in body and b"currentScript.remove()" in body
     assert b'"https://censor.local"' in body and b"__CENSOR_ORIGIN__" not in body
     assert b'"Sissy Censor System"' in body
     assert b'"__' not in body  # every template value filled in
@@ -198,6 +260,44 @@ def post_job(base, body, origin="https://www.reddit.com"):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req)
     return e.value.code
+
+
+def test_server_cors_only_for_allowlisted_origins(server):
+    srv, jobs, base = server
+    job = Job("e" * 24, "https://example.com/v.mp4", state="running")
+    jobs._jobs[job.id] = job
+    status, headers, _ = get(f"{base}/video/{job.id}/status", {"Origin": "https://www.reddit.com"})
+    assert headers["Access-Control-Allow-Origin"] == "https://www.reddit.com"
+    assert headers["Vary"] == "Origin"
+    status, headers, _ = get(f"{base}/video/{job.id}/status", {"Origin": "https://evil.example"})
+    assert "Access-Control-Allow-Origin" not in headers
+    status, headers, _ = get(f"{base}/video/{job.id}/status")
+    assert "Access-Control-Allow-Origin" not in headers
+
+
+def test_server_passes_origin_and_page_to_jobs(server, monkeypatch):
+    srv, jobs, base = server
+    calls = []
+
+    def fake_start(src, origin=None, user_agent=None, page=None):
+        calls.append((src, origin, user_agent, page))
+        return Job("d" * 24, src, state="running")
+    monkeypatch.setattr(jobs, "start", fake_start)
+    req = urllib.request.Request(
+        base + "/video/jobs", method="POST",
+        data=b'{"src": "https://example.com/v.mp4", "page": "https://www.reddit.com/r/x"}',
+        headers={"Origin": "https://www.reddit.com", "User-Agent": "UA/1"})
+    with urllib.request.urlopen(req) as r:
+        headers, body = dict(r.headers), json.loads(r.read())
+    assert headers["Access-Control-Allow-Origin"] == "https://www.reddit.com"
+    assert body["stream_url"] == f"/video/{'d' * 24}/stream"
+    assert calls == [("https://example.com/v.mp4", "https://www.reddit.com", "UA/1",
+                      "https://www.reddit.com/r/x")]
+
+    def refuse(*a, **k):
+        raise JobRefused("too many")
+    monkeypatch.setattr(jobs, "start", refuse)
+    assert post_job(base, b'{"src": "https://example.com/v.mp4"}') == 429
 
 
 def test_server_job_status_and_errors(server):

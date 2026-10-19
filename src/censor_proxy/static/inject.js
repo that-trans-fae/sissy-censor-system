@@ -10,7 +10,14 @@
 // often waiting its turn in the censor) gets a placeholder until it arrives.
 (() => {
   "use strict";
-  if (window.__censorProxy) return;
+  // Run once per document. The flag is a non-enumerable symbol rather than a
+  // named global, and the <script> tag is removed once it has run, so page
+  // scripts have nothing named to look for (the patched prototypes below are
+  // still detectable; that can't be helped).
+  const RAN = Symbol.for("media-guard");
+  if (document[RAN]) return;
+  Object.defineProperty(document, RAN, { value: true });
+  if (document.currentScript) document.currentScript.remove();
 
   const ORIGIN = "__CENSOR_ORIGIN__";
   const DEBUG = "__DEBUG__" === "true";
@@ -163,8 +170,6 @@
   const ours = new WeakSet();       // our own players, allowed to play
   const guarded = new Map();        // page <video> -> card state
   const manifests = [];             // manifest URLs seen, newest last
-
-  window.__censorProxy = { version: 1 };
 
   // ---- Remember manifests the page's players fetch ----------------------
   function note(url) {

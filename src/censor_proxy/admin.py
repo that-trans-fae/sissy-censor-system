@@ -445,7 +445,7 @@ def read_log_tail(path: str | None, limit: int) -> list[dict]:
 
 
 def job_view(job: Job, ready_seconds: float) -> dict:
-    return {**job.status(ready_seconds), "src": job.src, "page": job.referer,
+    return {**job.status(ready_seconds), "src": job.src, "page": job.page or job.referer,
             "created": job.created, "finished": job.finished,
             "cancel_reason": job.cancel_reason, "last_seen": job.last_seen}
 

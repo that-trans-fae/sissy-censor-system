@@ -86,9 +86,12 @@ keys are rejected at startup.
   your own from the
   admin panel's Whitelist tab (`whitelist.domains`).
 - Video injection extends every page's Content-Security-Policy to allow the
-  injected script, and lets pages ask the proxy to fetch public video URLs.
-  Narrow `video.hosts` to limit this. Private and loopback addresses are
-  refused unless `video.allow_private_sources` is on.
+  injected script, and lets pages ask the proxy to fetch public video URLs
+  (capped by `video.max_queued_jobs` and, per page origin,
+  `video.max_starts_per_minute`). Narrow `video.hosts` to limit this.
+  Private and loopback addresses are refused unless
+  `video.allow_private_sources` is on, and ffmpeg is held to
+  `video.source_protocols`.
 - The detection log records hostnames at the default `info` level, and full
   URLs at `debug`.
 

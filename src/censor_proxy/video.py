@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -40,6 +41,10 @@ class VideoError(RuntimeError):
     pass
 
 
+class JobRefused(VideoError):
+    """Over the queue cap or a page's rate limit; try again later."""
+
+
 @dataclass(frozen=True)
 class Probe:
     video_index: int
@@ -54,8 +59,12 @@ class Probe:
 class Job:
     id: str
     src: str
+    # Sent to the source host, from the browser-set Origin header (never the
+    # page-supplied URL, which any page could forge to anything).
     referer: str | None = None
     user_agent: str | None = None
+    # The page that asked, as the page reported it; shown in the admin panel.
+    page: str | None = None
     # queued | running | done | error
     state: str = "queued"
     error: str = ""
@@ -140,6 +149,7 @@ class VideoJobs:
         self._lock = threading.Lock()
         self._slots = threading.Semaphore(vcfg.max_concurrent_jobs)
         self._attempts = 0
+        self._starts: dict[str, deque[float]] = {}  # origin -> recent start times
 
     @property
     def detector(self) -> Detector:
@@ -173,20 +183,46 @@ class VideoJobs:
         with self._lock:
             return sum(j.state in ("queued", "running") for j in self._jobs.values())
 
-    def start(self, src: str, referer: str | None = None, user_agent: str | None = None) -> Job:
-        check_source(src, allow_private=self.cfg.video.allow_private_sources)
+    def start(self, src: str, origin: str | None = None, user_agent: str | None = None,
+              page: str | None = None) -> Job:
+        """Start (or reuse) the job for `src`. `origin` is the requesting
+        page's Origin header; it becomes the Referer and keys the rate limit."""
+        v = self.cfg.video
+        check_source(src, allow_private=v.allow_private_sources)
         id_ = job_id(src)
         with self._lock:
+            self._count_start(origin or "")
             job = self._jobs.get(id_)
             if job and job.state != "error" and not job.cancel_reason:
                 job.touch(active=True)
                 return job
+            queued = sum(j.state == "queued" and not j.cancel_reason for j in self._jobs.values())
+            if v.max_queued_jobs and queued >= v.max_queued_jobs:
+                raise JobRefused(f"{queued} videos are already waiting; try again later")
             # Own file per attempt: a cancelled run may still be shutting down.
             self._attempts += 1
-            job = Job(id_, src, referer, user_agent, path=self.dir / f"{id_}-{self._attempts}.mp4")
+            job = Job(id_, src, origin + "/" if origin else None, user_agent, page=page,
+                      path=self.dir / f"{id_}-{self._attempts}.mp4")
             self._jobs[id_] = job
         threading.Thread(target=self._run, args=(job,), name=f"video-{id_[:8]}", daemon=True).start()
         return job
+
+    def _count_start(self, origin: str) -> None:
+        """Record a start for `origin`, refusing it over max_starts_per_minute.
+        Called with the lock held."""
+        limit = self.cfg.video.max_starts_per_minute
+        if not limit:
+            return
+        now = time.time()
+        recent = self._starts.setdefault(origin, deque())
+        while recent and now - recent[0] > 60:
+            recent.popleft()
+        if len(recent) >= limit:
+            raise JobRefused("too many video requests from this page; try again in a minute")
+        recent.append(now)
+        if len(self._starts) > 1000:  # forget origins that have gone quiet
+            for key in [k for k, d in self._starts.items() if not d or now - d[-1] > 60]:
+                del self._starts[key]
 
     def cancel(self, id_: str, reason: str) -> None:
         job = self.get(id_)
@@ -269,7 +305,11 @@ def check_source(src: str, allow_private: bool = False) -> None:
             raise VideoError(f"{parts.hostname} is not a public address")
 
 
-def _net_args(job: Job) -> list[str]:
+def _net_args(job: Job, protocols: tuple[str, ...] = ()) -> list[str]:
+    # Only the configured protocols, for the source and everything it pulls
+    # in (HLS segments and keys): a playlist can't point ffmpeg at file: or
+    # other protocols. Must precede -i.
+    args = ["-protocol_whitelist", ",".join(protocols)] if protocols else []
     # Some CDNs (Pornhub's, behind Cloudflare) answer 410 to requests that
     # don't look like a browser's. User-Agent goes in -headers because
     # -user_agent puts it before Host, which browsers never do.
@@ -278,7 +318,8 @@ def _net_args(job: Job) -> list[str]:
         headers += f"User-Agent: {job.user_agent}\r\n"
     if job.referer:
         headers += f"Referer: {job.referer}\r\n"
-    args = ["-headers", headers] if headers else []
+    if headers:
+        args += ["-headers", headers]
     if HLS.search(urlsplit(job.src).path):
         # No open-ended "Range: bytes=0-" (the same CDNs refuse it); the
         # demuxer's own option covers its playlist and segment requests.
@@ -287,10 +328,10 @@ def _net_args(job: Job) -> list[str]:
     return args
 
 
-def probe(job: Job, timeout: float = 30) -> Probe:
+def probe(job: Job, protocols: tuple[str, ...] = (), timeout: float = 30) -> Probe:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format",
-         *_net_args(job), job.src],
+         *_net_args(job, protocols), job.src],
         capture_output=True, timeout=timeout)
     if out.returncode != 0:
         raise VideoError(f"cannot read source: {out.stderr.decode(errors='replace').strip()[:300]}")
@@ -325,7 +366,7 @@ def output_size(p: Probe, max_height: int) -> tuple[int, int]:
 
 def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
     vcfg = cfg.video
-    p = probe(job)
+    p = probe(job, vcfg.source_protocols)
     if p.duration and p.duration > vcfg.max_duration_seconds:
         raise VideoError(f"video is {p.duration:.0f}s, over the {vcfg.max_duration_seconds}s limit")
     job.update(duration=p.duration)
@@ -334,7 +375,7 @@ def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
     step = max(1, round(fps / vcfg.sample_fps))
     frame_bytes = w * h * 3
 
-    net = _net_args(job)
+    net = _net_args(job, vcfg.source_protocols)
     decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, "-i", job.src,
                   "-map", f"0:{p.video_index}", "-vf", f"scale={w}:{h}", "-r", f"{fps:.6g}",
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]

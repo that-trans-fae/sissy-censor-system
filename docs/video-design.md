@@ -125,8 +125,10 @@ The control's look (name, colours, icons, strings) lives in one place: the
 - **Not covered**: DRM-protected video (Widevine).
 - **Security**: with every site in scope, every page's Content-Security-
   Policy is extended to allow our script, and any page can ask the proxy to
-  fetch a public video URL. Private and loopback addresses stay refused.
-  The user will be warned about this trade-off (not built yet).
+  fetch a public video URL. Private and loopback addresses stay refused,
+  starts are capped and rate-limited per origin, and ffmpeg is held to a
+  protocol whitelist (`docs/decisions.md`, "Page-facing surface"). The user
+  will be warned about this trade-off (not built yet).
 
 ## Defaults chosen
 

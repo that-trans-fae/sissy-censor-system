@@ -142,6 +142,9 @@ class VideoConfig:
     ready_seconds: float
     max_duration_seconds: float
     max_concurrent_jobs: int
+    max_queued_jobs: int
+    max_starts_per_minute: int
+    source_protocols: tuple[str, ...]
     abandon_seconds: float
     idle_seconds: float
     allow_private_sources: bool
@@ -324,7 +327,8 @@ def _build(raw: dict[str, Any]) -> Config:
             max_body_bytes=int(raw["data_uris"]["max_body_bytes"]),
             svg_depth=int(raw["data_uris"]["svg_depth"]),
         ),
-        "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ())}),
+        "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ()),
+                                "source_protocols": tuple(raw["video"]["source_protocols"] or ())}),
         "proxy": ProxyConfig(
             health_host=raw["proxy"]["health_host"],
             admin_host=str(raw["proxy"]["admin_host"]).lower(),

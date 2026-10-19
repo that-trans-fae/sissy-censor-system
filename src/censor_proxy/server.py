@@ -24,7 +24,7 @@ from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from .config import Config
-from .video import Job, VideoError, VideoJobs
+from .video import Job, JobRefused, VideoError, VideoJobs
 
 log = logging.getLogger("censor_proxy.server")
 
@@ -83,15 +83,30 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- helpers ----------------------------------------------------------
 
+    def _origin(self) -> str | None:
+        """The request's Origin header when its host is on the video
+        allowlist, else None."""
+        origin = self.headers.get("Origin") or ""
+        host = urlsplit(origin).hostname or ""
+        return origin if origin and any(p.search(host) for p in self.app.video_hosts) else None
+
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Private-Network", "true")
+        """Let an allowlisted page read the response. Only the job endpoints
+        send this: /health and /inject.js are never readable cross-origin, so
+        a page can't use them to tell the proxy is running."""
+        if origin := self._origin():
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Vary", "Origin")
         self.send_header("Cache-Control", "no-store")
 
-    def _json(self, status: int, body: dict) -> None:
+    def _json(self, status: int, body: dict, cors: bool = True) -> None:
         data = json.dumps(body).encode()
         self.send_response(status)
-        self._cors()
+        if cors:
+            self._cors()
+        else:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -110,11 +125,11 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/health":
-            return self._json(200, self.app.health())
+            return self._json(200, self.app.health(), cors=False)
         if path == "/inject.js":
             data = self.app.inject_js()
             self.send_response(200)
-            self._cors()
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -146,8 +161,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path != "/video/jobs" and not cancel:
             return self._json(404, {"error": "not found"})
         # Only pages on the video allowlist may start or cancel jobs.
-        origin = urlsplit(self.headers.get("Origin") or "").hostname or ""
-        if not any(p.search(origin) for p in self.app.video_hosts):
+        origin = self._origin()
+        if origin is None:
             return self._json(403, {"error": "origin not allowed"})
         if cancel:
             self.app.jobs.cancel(cancel.group(1), "cancelled: the page closed or moved on")
@@ -155,8 +170,12 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(min(length, 65536)) or b"{}")
-            job = self.app.jobs.start(str(body.get("src", "")), body.get("page"),
-                                      self.headers.get("User-Agent"))
+            page = body.get("page")
+            job = self.app.jobs.start(str(body.get("src", "")), origin,
+                                      self.headers.get("User-Agent"),
+                                      page=str(page)[:2000] if page else None)
+        except JobRefused as e:
+            return self._json(429, {"error": str(e)})
         except (ValueError, VideoError) as e:
             return self._json(400, {"error": str(e)})
         status = job.status(self.app.cfg.video.ready_seconds)
