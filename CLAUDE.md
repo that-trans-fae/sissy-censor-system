@@ -36,7 +36,7 @@ src/tools/draw_boxes.py        box-draw review of the samples
 src/tools/dump_video_scores.py, replay_attribution.py  video attribution tuning
 src/tests/                     pytest; fixtures/expected-<model>.json
 docs/brand/                    mark, README banners, palette, browser icon
-install/                       one-line installers (system-level per OS, dedicated browser)
+install/                       one-line dedicated browser installers (browser.sh, browser.ps1)
 docs/samples/{censor,mixed,uncensor}/  sample images (not in git)
 ```
 

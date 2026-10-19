@@ -13,7 +13,8 @@ docker compose up -d --build
 The proxy listens on `127.0.0.1:8080`. On first start mitmproxy creates its CA
 in `./mitmproxy/`, which is kept across rebuilds so trust only has to be
 installed once. The container runs as an unprivileged user (`user:` in
-`compose.yaml`, which must match your `id -u`:`id -g` so it can write
+`compose.yaml`, 1000:1000 unless `SCS_UID` and `SCS_GID` are set in `.env`
+next to it; it must match your `id -u`:`id -g` so it can write
 `./mitmproxy`, `./config` and `./logs`) with a read-only root filesystem and
 no capabilities; once the CA exists, you can mount `./mitmproxy` read-only
 too (append `:ro` to its volume line) so nothing in the container can

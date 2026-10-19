@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Sissy Censor System: dedicated browser installer for Linux and macOS.
 #
-# Installs Docker Desktop, clones the repository, builds and starts the
-# proxy, installs Chromium and adds a "Sissy Browser" launcher: a separate
+# Installs Docker (Docker Engine on Linux, Docker Desktop on macOS), clones
+# the repository, builds and starts the proxy, installs Chromium and adds a "Sissy Browser" launcher: a separate
 # Chromium profile that always goes through the proxy and trusts its CA in
 # the profile's own certificate store. Nothing system-wide changes: no
 # system proxy, no CA in the system store, and your usual browsers are
@@ -12,7 +12,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | bash
 #
-# Remove the launcher and its profile (keeps Docker Desktop, Chromium and the checkout):
+# Remove the launcher and its profile (keeps Docker, Chromium and the checkout):
 #
 #   curl -fsSL https://raw.githubusercontent.com/OWNER/scs/main/install/browser.sh | SCS_UNINSTALL=1 bash
 #
@@ -35,6 +35,9 @@ ICON_SVG="$SCS_DIR/docs/brand/browser-icon.svg"
 ADMIN_URL="http://localhost:8082/admin"
 ADMIN_BOOKMARK="SCS admin panel"
 OS=$(uname -s)
+# Docker as this user, or through sudo until a new login picks up the
+# docker group (Linux).
+DOCKER=(docker)
 
 # ----------------------------------------------------------------- helpers
 log()  { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
@@ -47,7 +50,6 @@ case "$OS" in Linux|Darwin) ;; *) die "this installer is for Linux and macOS" ;;
 
 PKG=
 if [ "$OS" = Linux ]; then
-  [ "$(uname -m)" = x86_64 ] || die "Docker Desktop for Linux only ships for x86_64 (this is $(uname -m))"
   have sudo || die "sudo is required"
   if have apt-get; then PKG=apt
   elif have dnf; then PKG=dnf
@@ -71,18 +73,19 @@ brew_bin() {
   fi
 }
 
-# ---------------------------------------------------------- docker desktop
-install_docker_desktop_linux() {
-  if [ -f /opt/docker-desktop/bin/com.docker.backend ]; then
-    log "Docker Desktop is already installed"
+# ------------------------------------------------------------------ docker
+# Docker Engine from Docker's own repositories (Arch: the distribution's).
+# The script and the launcher talk to it on its socket, so a Docker Desktop
+# context, if one is set, is left alone.
+install_docker_linux() {
+  if have docker && systemctl cat docker.service >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    log "Docker is already installed"
     return
   fi
-  log "Installing Docker Desktop"
-  [ -e /dev/kvm ] || warn "/dev/kvm is missing: Docker Desktop needs KVM (enable virtualisation in the BIOS)"
-  local tmp; tmp=$(mktemp -d)
+  log "Installing Docker"
   case "$PKG" in
     apt)
-      pkg_install ca-certificates curl gnupg
+      pkg_install ca-certificates curl
       . /etc/os-release
       sudo install -m 0755 -d /etc/apt/keyrings
       sudo curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
@@ -90,8 +93,7 @@ install_docker_desktop_linux() {
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$ID $VERSION_CODENAME stable" \
         | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
       sudo apt-get update
-      curl -fL https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb -o "$tmp/docker-desktop.deb"
-      sudo apt-get install -y "$tmp/docker-desktop.deb"
+      pkg_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
       ;;
     dnf)
       if dnf --version 2>/dev/null | head -1 | grep -q '^dnf5'; then
@@ -100,16 +102,12 @@ install_docker_desktop_linux() {
         sudo dnf -y install dnf-plugins-core
         sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
       fi
-      curl -fL https://desktop.docker.com/linux/main/amd64/docker-desktop-x86_64.rpm -o "$tmp/docker-desktop.rpm"
-      sudo dnf install -y "$tmp/docker-desktop.rpm"
+      pkg_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
       ;;
     pacman)
-      pkg_install docker docker-compose
-      curl -fL https://desktop.docker.com/linux/main/amd64/docker-desktop-x86_64.pkg.tar.zst -o "$tmp/docker-desktop.pkg.tar.zst"
-      sudo pacman -U --noconfirm "$tmp/docker-desktop.pkg.tar.zst"
+      pkg_install docker docker-compose docker-buildx
       ;;
   esac
-  rm -rf "$tmp"
 }
 
 install_docker_desktop_macos() {
@@ -126,14 +124,23 @@ install_docker_desktop_macos() {
   "$brew" install --cask docker-desktop || "$brew" install --cask docker
 }
 
-start_docker_desktop() {
-  log "Starting Docker Desktop"
+GROUP_ADDED=0
+start_docker() {
   if [ "$OS" = Linux ]; then
-    systemctl --user enable --now docker-desktop >/dev/null 2>&1 || systemctl --user start docker-desktop
-    docker context use desktop-linux >/dev/null 2>&1 || true
-  else
-    open -ga Docker
+    log "Starting Docker"
+    export DOCKER_HOST=unix:///var/run/docker.sock
+    sudo systemctl enable --now docker.service
+    if ! id -nG "$USER" | grep -qw docker; then
+      log "Adding $USER to the docker group (takes effect at your next login)"
+      sudo usermod -aG docker "$USER"
+      GROUP_ADDED=1
+    fi
+    docker info >/dev/null 2>&1 || DOCKER=(sudo docker)
+    "${DOCKER[@]}" info >/dev/null || die "Docker did not start; check 'systemctl status docker'"
+    return
   fi
+  log "Starting Docker Desktop"
+  open -ga Docker
   local waited=0
   until docker info >/dev/null 2>&1; do
     if [ "$waited" -eq 0 ]; then
@@ -167,7 +174,12 @@ clone_repo() {
 
 start_proxy() {
   log "Building and starting the proxy (the first build downloads a few hundred MB)"
-  (cd "$SCS_DIR/src" && docker compose up -d --build)
+  # The container runs unprivileged and writes to these mounts; Docker Engine
+  # would create missing ones as root, where it can't.
+  mkdir -p "$SCS_DIR/src/mitmproxy" "$SCS_DIR/src/config" "$SCS_DIR/src/logs"
+  # Run the container as this user (user: in src/compose.yaml reads .env).
+  printf 'SCS_UID=%s\nSCS_GID=%s\n' "$(id -u)" "$(id -g)" >"$SCS_DIR/src/.env"
+  (cd "$SCS_DIR/src" && "${DOCKER[@]}" compose up -d --build)
   local waited=0
   until [ -s "$CA_PEM" ]; do
     [ "$waited" -lt 120 ] || die "the proxy did not write its CA to $CA_PEM"
@@ -246,6 +258,7 @@ CA="\$SCS_DIR/src/mitmproxy/mitmproxy-ca-cert.pem"
 DB="\$PROFILE/Default/ServerCertificate"
 
 # Start the proxy if Docker is up and it is not running yet.
+$( [ "$OS" = Linux ] && echo 'export DOCKER_HOST=unix:///var/run/docker.sock' )
 if command -v timeout >/dev/null 2>&1; then t="timeout 30"; else t=""; fi
 (cd "\$SCS_DIR/src" && \$t docker compose up -d >/dev/null 2>&1) || true
 
@@ -455,13 +468,13 @@ uninstall_launcher() {
 # -------------------------------------------------------------------- main
 if [ "$SCS_UNINSTALL" = 1 ]; then
   uninstall_launcher
-  log "Done. Docker Desktop, Chromium and $SCS_DIR were left in place; stop the proxy with"
+  log "Done. Docker, Chromium and $SCS_DIR were left in place; stop the proxy with"
   echo "    (cd $SCS_DIR/src && docker compose down)"
   exit 0
 fi
 
-if [ "$OS" = Linux ]; then install_docker_desktop_linux; else install_docker_desktop_macos; fi
-start_docker_desktop
+if [ "$OS" = Linux ]; then install_docker_linux; else install_docker_desktop_macos; fi
+start_docker
 clone_repo
 start_proxy
 install_chromium
@@ -479,3 +492,4 @@ cat <<EOF
     Checkout:     $SCS_DIR
     Only $BROWSER_NAME goes through the proxy; your other browsers are unchanged.
 EOF
+[ "$GROUP_ADDED" = 0 ] || echo "    Log out and back in so you can run docker without sudo."

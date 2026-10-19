@@ -10,6 +10,9 @@ src/models/*.onnx
 mitmproxy/
 logs/
 
+# Per-machine compose settings (SCS_UID, SCS_GID); the installer writes it
+.env
+
 # Box-draw review output
 review*/
 

@@ -66,15 +66,17 @@ Last updated Oct 19, 2026.
   PIN, phone layout). `https://scs.local` was only tested with curl through
   the proxy
 
-- Installers (`install/`): one-line scripts run from GitHub for Linux,
-  macOS and Windows (Docker Desktop, clone, build, system CA trust, system
-  proxy, with `SCS_UNINSTALL=1` to reverse) and a dedicated "Sissy Browser"
-  Chromium profile pinned to the proxy with its own icon, the admin panel
-  on its bookmark bar and the proxy CA trusted in the profile's own
-  certificate store (no flags, no system trust). The browser installer is
-  verified on Ubuntu with snap Chromium 155; the system-level installers,
-  macOS and Windows are syntax-checked only (bash, shellcheck, PowerShell
-  parser). The repository URL is still a placeholder
+- Installer (`install/`): one-line scripts run from GitHub for Linux,
+  macOS and Windows (Docker Engine on Linux, Docker Desktop elsewhere,
+  clone, build, with `SCS_UNINSTALL=1` to reverse) that set up a dedicated "Sissy Browser" Chromium profile
+  pinned to the proxy with its own icon, the admin panel on its bookmark
+  bar and the proxy CA trusted in the profile's own certificate store (no
+  flags, no system trust). Verified on Ubuntu with snap Chromium 155; macOS
+  and Windows are syntax-checked only (bash, shellcheck, PowerShell
+  parser). The system-level installers were dropped and Linux moved from
+  Docker Desktop to Docker Engine (Oct 19, 2026); the Engine path is
+  syntax-checked only. The
+  repository URL is still a placeholder
 
 ## Not done yet
 

@@ -10,8 +10,9 @@ services:
       # through the proxy).
       - "127.0.0.1:8082:8082"
     # Unprivileged: the uid:gid the service runs as. Match `id -u`:`id -g` on
-    # the host, so it can write ./mitmproxy, ./config and ./logs.
-    user: "1000:1000"
+    # the host, so it can write ./mitmproxy, ./config and ./logs. Set
+    # SCS_UID and SCS_GID in .env next to this file (the installer writes it).
+    user: "${SCS_UID:-1000}:${SCS_GID:-1000}"
     environment:
       HOME: /tmp
     volumes:
