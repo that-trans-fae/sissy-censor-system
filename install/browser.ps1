@@ -321,8 +321,15 @@ function Trust-CaInProfile($chromium) {
     if (-not (Test-Path $db)) {
         if (Test-ProfileInUse) { Warn "$BrowserName is running; close it and rerun to trust the proxy CA"; return }
         Log 'Initialising the profile'
+        # Its output (the blank page's DOM, a harmless registry error from a
+        # system-level Chromium) is kept out of the console and shown only
+        # when the store does not appear.
+        $log = Join-Path $env:TEMP 'sissy-browser-init'
         Start-Process -Wait -WindowStyle Hidden -FilePath $chromium -ArgumentList @(
-            "--user-data-dir=`"$ProfileDir`"", $ChromiumFeatures, '--headless=new', '--disable-gpu', '--no-first-run', '--dump-dom', 'about:blank')
+            "--user-data-dir=`"$ProfileDir`"", $ChromiumFeatures, '--headless=new', '--disable-gpu', '--no-first-run', '--dump-dom', 'about:blank') `
+            -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+        if (-not (Test-Path $db)) { Get-Content "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 10 | Write-Host }
+        Remove-Item -Force -ErrorAction SilentlyContinue "$log.out", "$log.err"
     }
     if (-not (Test-Path $db)) { Die "Chromium $(Chromium-Version $chromium) at $chromium did not create $db ($ChromiumMinVersion or newer is needed)" }
     Log "Trusting the proxy CA in the $BrowserName profile"
