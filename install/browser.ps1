@@ -452,10 +452,89 @@ function Write-Icon($path) {
 }
 
 # --------------------------------------------------------------- shortcut
+# The taskbar groups windows by AppUserModelID, and Chromium gives every
+# window one of its own: its registered id (Chromium, plus a per-user suffix
+# for a per-user install) and the profile, as shell_integration_win.cc builds
+# it from the user-data-dir's and the profile's directory names (letters,
+# digits and dots kept). Chromium also sets a relaunch command on the window
+# that has no --user-data-dir or proxy, so a pin taken from a running window
+# would open a plain, unproxied Chromium. The shortcuts carry the same id,
+# which makes Windows pin and group through them instead.
+function Get-ChromiumAppId($chromium) {
+    $registered = Get-ItemProperty -ErrorAction SilentlyContinue -Name AppUserModelID -Path `
+        'HKCU:\Software\Classes\ChromiumHTM*\Application', 'HKLM:\Software\Classes\ChromiumHTM*\Application' |
+        Select-Object -First 1
+    if ($registered) { $app = $registered.AppUserModelID }
+    else {
+        # Not registered: Chromium's own rule. Per-user installs get a dot and
+        # the base32 of the MD5 of the user's SID (ShellUtil's suffix).
+        $app = 'Chromium'
+        if (-not $chromium.StartsWith($env:ProgramFiles, 'OrdinalIgnoreCase')) {
+            $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $md5 = [System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::ASCII.GetBytes($sid))
+            $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+            $bits = ($md5 | ForEach-Object { [Convert]::ToString($_, 2).PadLeft(8, '0') }) -join ''
+            $b32 = ''
+            for ($i = 0; $i + 5 -le $bits.Length; $i += 5) { $b32 += $alphabet[[Convert]::ToInt32($bits.Substring($i, 5), 2)] }
+            if ($bits.Length % 5) { $b32 += $alphabet[[Convert]::ToInt32($bits.Substring($i).PadRight(5, '0'), 2)] }
+            $app = "Chromium.$b32"
+        }
+    }
+    $profile = ((Split-Path -Leaf $ProfileDir) + '.Default') -replace '[^A-Za-z0-9.]', ''
+    return "$app.$profile"
+}
+
+# Writes System.AppUserModel.ID into a .lnk (its property store).
+function Set-ShortcutAppId($path, $appId) {
+    if (-not ('Scs.Lnk' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+namespace Scs {
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PropertyKey { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PropVariant { public ushort vt; public ushort r1; public ushort r2; public ushort r3; public IntPtr p; public IntPtr p2; }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {
+        void GetCount(out uint count);
+        void GetAt(uint index, out PropertyKey key);
+        void GetValue(ref PropertyKey key, out PropVariant value);
+        void SetValue(ref PropertyKey key, ref PropVariant value);
+        void Commit();
+    }
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046"), ClassInterface(ClassInterfaceType.None)]
+    public class ShellLink { }
+    public static class Lnk {
+        public static void SetAppId(string path, string appId) {
+            object link = new ShellLink();
+            ((IPersistFile)link).Load(path, 2);   // STGM_READWRITE
+            PropertyKey key = new PropertyKey();
+            key.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");   // System.AppUserModel.ID
+            key.pid = 5;
+            PropVariant value = new PropVariant();
+            value.vt = 31;   // VT_LPWSTR
+            value.p = Marshal.StringToCoTaskMemUni(appId);
+            try {
+                IPropertyStore store = (IPropertyStore)link;
+                store.SetValue(ref key, ref value);
+                store.Commit();
+                ((IPersistFile)link).Save(path, true);
+            } finally { Marshal.FreeCoTaskMem(value.p); }
+        }
+    }
+}
+'@
+    }
+    [Scs.Lnk]::SetAppId($path, $appId)
+}
+
 function Install-Shortcuts($chromium) {
     Log "Adding the $BrowserName shortcuts"
     New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
     Write-Icon $IconPath
+    $appId = Get-ChromiumAppId $chromium
     $shell = New-Object -ComObject WScript.Shell
     foreach ($path in $Shortcuts) {
         $lnk = $shell.CreateShortcut($path)
@@ -467,6 +546,8 @@ function Install-Shortcuts($chromium) {
         $lnk.IconLocation = "$IconPath,0"
         $lnk.Description = 'Chromium through the Sissy Censor System proxy'
         $lnk.Save()
+        try { Set-ShortcutAppId $path $appId }
+        catch { Warn "could not give $path Chromium's taskbar id ($($_.Exception.Message)); its windows will show as Chromium" }
     }
 }
 
@@ -499,6 +580,11 @@ function Set-SafeSearchPolicy([bool]$on) {
 # Seeds the profile so the bookmark bar is shown with the admin panel on it.
 # Chromium reads these files when the profile first opens and fills in the
 # ids and checksum itself; an existing profile gets the bookmark inserted.
+# The profile icon too: Chromium shows "Google Profile.ico" from the profile
+# directory on the window's taskbar button (its relaunch icon), and writes
+# its own there on first run unless the icon prefs already say the icon is
+# current (profile_shortcut_manager_win.cc; version 10 as of Chromium 155,
+# a later Chromium that bumps it redraws its own icon, nothing worse).
 function Write-Json($path, $data) {
     $json = $data | ConvertTo-Json -Depth 20
     [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))   # no BOM
@@ -534,15 +620,25 @@ function Seed-Profile {
             Write-Json $bookmarks $data
         }
     }
+    Copy-Item -Force $IconPath (Join-Path $default 'Google Profile.ico')
     if (-not (Test-Path $prefs)) {
-        Write-Json $prefs @{ bookmark_bar = @{ show_on_all_tabs = $true } }
+        Write-Json $prefs @{ bookmark_bar = @{ show_on_all_tabs = $true }
+                             profile = @{ icon_version = 10; icon_win11_format = $true } }
     } else {
         $data = Get-Content -Raw $prefs | ConvertFrom-Json
+        $changed = $false
         if (-not $data.bookmark_bar) { $data | Add-Member -NotePropertyName bookmark_bar -NotePropertyValue ([pscustomobject]@{}) }
         if (-not $data.bookmark_bar.show_on_all_tabs) {
             $data.bookmark_bar | Add-Member -Force -NotePropertyName show_on_all_tabs -NotePropertyValue $true
-            Write-Json $prefs $data
+            $changed = $true
         }
+        if (-not $data.profile) { $data | Add-Member -NotePropertyName profile -NotePropertyValue ([pscustomobject]@{}) }
+        if (-not $data.profile.icon_version) {
+            $data.profile | Add-Member -Force -NotePropertyName icon_version -NotePropertyValue 10
+            $data.profile | Add-Member -Force -NotePropertyName icon_win11_format -NotePropertyValue $true
+            $changed = $true
+        }
+        if ($changed) { Write-Json $prefs $data }
     }
 }
 
