@@ -40,5 +40,5 @@ def make_config(tmp_path):
 def cfg(make_config):
     # Thresholds pinned so selection-rule tests don't move with the defaults.
     return make_config("images: {size_floor_bytes: 0, min_side_px: 1}\ncache: {max_entries: 0}\n"
-                       "detection: {threshold: 0.5, label_thresholds: {}, corroborated_threshold: 0.35,"
+                       "detection: {preset: custom, threshold: 0.5, label_thresholds: {}, corroborated_threshold: 0.35,"
                        " male_context_threshold: 0.65, context_threshold: 0.4}\n")

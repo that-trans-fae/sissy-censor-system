@@ -47,6 +47,7 @@ def panel(tmp_path):
     port = free_port()
     path = tmp_path / "config.yaml"
     path.write_text(USER_CONFIG + f"\nadmin:\n  bind: 127.0.0.1\n  port: {port}\n"
+                    f"  attempts_log: '{tmp_path / 'attempts.jsonl'}'\n"
                     f"video:\n  cache_dir: '{tmp_path / 'video'}'\n"
                     f"logging:\n  path: '{tmp_path / 'detections.jsonl'}'\n")
     cfg = load_config(path)
@@ -120,6 +121,7 @@ def test_settings_saved_with_comments_and_applied(panel):
     r, view = client("POST", "/admin/api/config", {"set": {
         "censor.style": "pixelate",
         "whitelist.domains": ["youtube.com", "https://Example.ORG/page", "youtube.com"],
+        "detection.preset": "custom",
         "detection.threshold": 0.35,
     }})
     assert r.status == 200, view
@@ -189,8 +191,7 @@ def test_reload_from_file(panel):
 
 def test_pin_lock(panel):
     client, app, server, path = panel
-    assert client("GET", "/admin/api/session")[1] == {"pin_set": False, "unlocked": True,
-                                                      "retry_after": 0}
+    assert client("GET", "/admin/api/session")[1] == {"pin_set": False, "unlocked": True}
     r, body = client("POST", "/admin/api/pin", {"new": "12ab"})
     assert r.status == 400
     r, body = client("POST", "/admin/api/pin", {"new": "4321"})
@@ -204,7 +205,7 @@ def test_pin_lock(panel):
     assert r.status == 401 and body["locked"]
     assert client("GET", "/admin/")[0].status == 200  # the page itself shows the PIN prompt
     r, body = client("POST", "/admin/api/unlock", {"pin": "0000"})
-    assert r.status == 403 and body["attempts_left"] == 4
+    assert r.status == 403 and body == {"error": "Wrong PIN."}
     r, body = client("POST", "/admin/api/unlock", {"pin": "4321"})
     assert r.status == 200 and client.cookie
     assert client("GET", "/admin/api/status")[0].status == 200
@@ -223,28 +224,66 @@ def test_pin_lock(panel):
     assert client("GET", "/admin/api/status")[0].status == 200
 
 
-def test_pin_lockout_and_expiry(make_config):
+def test_whole_panel_locked(panel):
+    client, *_ = panel
+    client("POST", "/admin/api/pin", {"new": "4321"})
+    client.cookie = None
+    for method, path in [("GET", "status"), ("GET", "log"), ("GET", "jobs"), ("GET", "config"),
+                         ("GET", "attempts"), ("POST", "attempts/ack"), ("POST", "config"),
+                         ("POST", "config/reload"), ("POST", "pin"), ("POST", "lock"),
+                         ("POST", f"jobs/{'a' * 24}/cancel")]:
+        r, body = client(method, f"/admin/api/{path}", {} if method == "POST" else None)
+        assert r.status == 401 and body["locked"], path
+
+
+def test_wrong_pins_never_lock_out_and_are_reported(panel):
+    client, app, server, _ = panel
+    client("POST", "/admin/api/pin", {"new": "2468"})
+    client.cookie = None
+    for _ in range(20):
+        r, _ = client("POST", "/admin/api/unlock", {"pin": "1111"},
+                      headers={"User-Agent": "Guesser/1.0"})
+        assert r.status == 403
+    r, _ = client("POST", "/admin/api/unlock", {"pin": "2468"})
+    assert r.status == 200
+    _, body = client("GET", "/admin/api/attempts")
+    assert len(body["attempts"]) == 20
+    first = body["attempts"][0]
+    assert first["action"] == "unlock" and first["via"] == f"localhost:{client.port}"
+    assert first["user_agent"] == "Guesser/1.0"
+    assert client("GET", "/admin/api/status")[1]["wrong_pin_entries"] == 20
+    # A wrong current PIN when changing it counts too.
+    client("POST", "/admin/api/pin", {"current": "0000", "new": "1357"})
+    assert client("GET", "/admin/api/attempts")[1]["attempts"][-1]["action"] == "change PIN"
+
+    # Kept across a restart (a new log over the same file) until dismissed.
+    from censor_proxy.admin import AttemptLog
+    assert len(AttemptLog(app.cfg.admin.attempts_log).unacknowledged()) == 21
+    client("POST", "/admin/api/attempts/ack", {})
+    assert client("GET", "/admin/api/attempts")[1]["attempts"] == []
+    assert AttemptLog(app.cfg.admin.attempts_log).unacknowledged() == []
+
+
+def test_session_expiry(make_config):
     now = [1000.0]
-    cfg = make_config("admin: {pin_max_attempts: 3, pin_lockout_seconds: 60, session_seconds: 30}\n")
+    cfg = make_config("admin: {session_seconds: 30}\n")
     lock = PinLock(cfg.admin, clock=lambda: now[0])
     lock.cfg = type(cfg.admin)(**{**cfg.admin.__dict__, "pin_hash": hash_pin("2468")})
-    for left in (2, 1):
-        with pytest.raises(admin_mod.AdminError) as e:
-            lock.check("1111")
-        assert e.value.status == 403 and e.value.body["attempts_left"] == left
-    with pytest.raises(admin_mod.AdminError) as e:
-        lock.check("1111")
-    assert e.value.status == 429 and e.value.body["retry_after"] == 60
-    with pytest.raises(admin_mod.AdminError) as e:
-        lock.check("2468")  # even the right PIN waits out the lockout
-    assert e.value.status == 429
-    now[0] += 61
-    lock.check("2468")
+    assert not lock.check("1111") and lock.check("2468")
     token = lock.open_session()
     now[0] += 20
     assert lock.valid(token, touch=False)
     now[0] += 20  # 40 s since last use: background polling didn't count
     assert not lock.valid(token)
+
+
+def test_attempt_log_without_file():
+    from censor_proxy.admin import AttemptLog
+    log = AttemptLog(None)
+    log.record("unlock", "scs.local", None)
+    assert [a["via"] for a in log.unacknowledged()] == ["scs.local"]
+    log.acknowledge()
+    assert log.unacknowledged() == []
 
 
 def test_pin_hash():
@@ -295,3 +334,58 @@ def test_help_text_from_defaults():
     help_ = defaults_help()
     assert "subdomains" in help_["whitelist"]["domains"]
     assert help_["censor"]["style"] == "gaussian | pixelate | solid"
+
+
+def test_presets_lock_detection_and_seed_custom(panel):
+    client, app, _, path = panel
+    r, view = client("POST", "/admin/api/config", {"set": {"detection.preset": "lax"}})
+    assert r.status == 200 and view["preset"]["active"] == "lax"
+    assert [o["name"] for o in view["preset"]["options"]] == ["strict", "lax"]
+    assert app.cfg.detection.preset == "lax"
+    assert "FEMALE_BREAST_EXPOSED" not in app.cfg.detection.female_labels
+    assert "FEMALE_BREAST_EXPOSED" in app.cfg.detection.female_context_labels
+
+    # A preset owns the detection keys.
+    r, body = client("POST", "/admin/api/config", {"set": {"detection.threshold": 0.5}})
+    assert r.status == 400 and "Custom" in body["error"]
+
+    # Custom starts from the level you had, then takes your own values.
+    client("POST", "/admin/api/config", {"set": {"detection.preset": "custom"}})
+    assert "FEMALE_BREAST_EXPOSED" not in app.cfg.detection.female_labels
+    assert "female_labels:\n    - FEMALE_GENITALIA_EXPOSED" in path.read_text()
+    r, _ = client("POST", "/admin/api/config", {"set": {"detection.threshold": 0.5}})
+    assert r.status == 200 and app.cfg.detection.threshold == 0.5
+
+    # Back to strict: the custom values stay in the file but don't apply.
+    client("POST", "/admin/api/config", {"set": {"detection.preset": "strict"}})
+    assert app.cfg.detection.threshold == 0.3
+    assert "FEMALE_BREAST_EXPOSED" in app.cfg.detection.female_labels
+    assert "threshold: 0.5" in path.read_text()
+    # ...and come back when custom is chosen again, without reseeding.
+    client("POST", "/admin/api/config", {"set": {"detection.preset": "custom"}})
+    assert app.cfg.detection.threshold == 0.5
+
+
+def test_any_number_of_presets_offered(panel):
+    client, app, _, path = panel
+    extra = "".join(f"    level{i}:\n      description: Level {i}\n      settings:\n"
+                    f"        threshold: {0.3 + i / 100}\n" for i in range(12))
+    path.write_text(path.read_text() + "detection:\n  presets:\n" + extra)
+    client("POST", "/admin/api/config/reload", {})
+    _, view = client("GET", "/admin/api/config")
+    names = [o["name"] for o in view["preset"]["options"]]
+    assert names[:2] == ["strict", "lax"] and len(names) == 14
+    r, view = client("POST", "/admin/api/config", {"set": {"detection.preset": "level11"}})
+    assert r.status == 200 and app.cfg.detection.threshold == 0.41
+    assert "level11" in path.read_text() and "level0:" in path.read_text()
+
+
+def test_model_choices_offered(panel):
+    client, app, *_ = panel
+    _, view = client("GET", "/admin/api/config")
+    assert [(m["label"], m["name"], m["path"], m["resolution"]) for m in view["models"]] == \
+        [("Fast", "320n", None, 320), ("Slow", "640m", "/app/models/640m.onnx", 640)]
+    assert view["models"][0]["installed"]
+    shown = {(s["name"], k["key"]) for s in view["sections"] for k in s["keys"]}
+    assert ("model", "available") not in shown and ("detection", "presets") not in shown
+    assert ("model", "path") in shown and ("detection", "preset") in shown

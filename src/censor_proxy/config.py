@@ -15,6 +15,9 @@ DEFAULTS_PATH = Path(__file__).with_name("defaults.yaml")
 CONFIG_ENV = "CENSOR_CONFIG"
 
 CENSOR_STYLES = ("gaussian", "pixelate", "solid")
+CUSTOM_PRESET = "custom"
+# Detection keys a preset can't set.
+PRESET_KEYS = frozenset({"preset", "presets"})
 LOG_LEVELS = ("off", "info", "debug")
 DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)*"
                     r"[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$")
@@ -25,16 +28,34 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class ModelChoice:
+    name: str
+    label: str
+    description: str
+    path: str | None
+    resolution: int
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     path: str | None
     resolution: int
     workers: int
     threads_per_worker: int
     tiling: bool
+    available: tuple[ModelChoice, ...]
+
+    def name_for(self, path: str | None, resolution: int) -> str:
+        """The label and name of the listed model with these weights, else the path."""
+        for m in self.available:
+            if m.path == path and (path is None or m.resolution == resolution):
+                return m.name if m.label == m.name else f"{m.label} ({m.name})"
+        return path or "320n (bundled)"
 
 
 @dataclass(frozen=True)
 class DetectionConfig:
+    preset: str
     threshold: float
     label_thresholds: dict[str, float]
     corroborated_threshold: float
@@ -149,8 +170,7 @@ class AdminConfig:
     port: int
     allowed_hosts: frozenset[str]
     pin_hash: str | None
-    pin_max_attempts: int
-    pin_lockout_seconds: float
+    attempts_log: str | None
     session_seconds: float
     log_entries: int
 
@@ -211,12 +231,50 @@ def _merge(defaults: dict, override: dict) -> dict:
     return {**defaults, **out}
 
 
+def _apply_preset(raw: dict, defaults_: dict) -> dict:
+    """Replace the detection section with the defaults plus the chosen
+    preset's settings, unless the preset is custom."""
+    d = raw["detection"]
+    presets = d["presets"] or {}
+    if not isinstance(presets, dict):
+        raise ConfigError("detection.presets must be a mapping")
+    for name, preset in presets.items():
+        if name == CUSTOM_PRESET:
+            raise ConfigError("detection.presets: 'custom' is reserved")
+        if not isinstance(preset, dict) or not isinstance(preset.get("settings") or {}, dict):
+            raise ConfigError(f"detection.presets.{name} needs a settings mapping")
+        for key in preset.get("settings") or {}:
+            if key not in defaults_["detection"] or key in PRESET_KEYS:
+                raise ConfigError(f"detection.presets.{name}: unknown detection key {key}")
+    name = d["preset"]
+    if name == CUSTOM_PRESET:
+        return raw
+    if name not in presets:
+        raise ConfigError(f"detection.preset must be {CUSTOM_PRESET} or one of "
+                          f"{sorted(presets)}, got {name!r}")
+    settings = presets[name].get("settings") or {}
+    return {**raw, "detection": {**defaults_["detection"], **settings,
+                                 "preset": name, "presets": presets}}
+
+
 def _build(raw: dict[str, Any]) -> Config:
     d = raw["detection"]
     c = raw["censor"]
+    m = raw["model"]
+    available = []
+    for entry in m["available"] or ():
+        try:
+            available.append(ModelChoice(name=str(entry["name"]),
+                                         label=str(entry.get("label") or entry["name"]),
+                                         description=str(entry.get("description") or ""),
+                                         path=entry.get("path") or None,
+                                         resolution=int(entry["resolution"])))
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            raise ConfigError(f"model.available: each entry needs name and resolution ({e})") from e
     sections = {
-        "model": ModelConfig(**raw["model"]),
+        "model": ModelConfig(**{**m, "available": tuple(available)}),
         "detection": DetectionConfig(
+            preset=str(d["preset"]),
             threshold=float(d["threshold"]),
             label_thresholds={str(k): float(v) for k, v in (d["label_thresholds"] or {}).items()},
             corroborated_threshold=float(d["corroborated_threshold"]),
@@ -258,6 +316,7 @@ def _build(raw: dict[str, Any]) -> Config:
             **raw["admin"],
             "allowed_hosts": frozenset(str(h).lower() for h in raw["admin"]["allowed_hosts"] or ()),
             "pin_hash": raw["admin"]["pin_hash"] or None,
+            "attempts_log": raw["admin"]["attempts_log"] or None,
         }),
         "cache": CacheConfig(**raw["cache"]),
         "logging": LoggingConfig(**raw["logging"]),
@@ -298,17 +357,27 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("admin.port must be between 1 and 65535")
     if cfg.admin.port == cfg.proxy.internal_port:
         raise ConfigError("admin.port and proxy.internal_port must differ")
-    if cfg.admin.pin_max_attempts < 1 or cfg.admin.session_seconds <= 0:
-        raise ConfigError("admin.pin_max_attempts must be >= 1 and admin.session_seconds > 0")
+    if cfg.admin.session_seconds <= 0:
+        raise ConfigError("admin.session_seconds must be > 0")
 
 
 def defaults() -> dict:
     return yaml.safe_load(DEFAULTS_PATH.read_text())
 
 
-def merged(override: dict) -> dict:
-    """The effective raw config: defaults with a user override merged in."""
-    return _merge(defaults(), override)
+def merged(override: dict, apply_preset: bool = True) -> dict:
+    """The effective raw config: defaults with a user override merged in, and
+    the detection preset applied (unless apply_preset is false)."""
+    defaults_ = defaults()
+    raw = _merge(defaults_, override)
+    # Presets merge by name, so config.yaml can add any number without
+    # repeating the built-in ones; a preset set to null is removed.
+    user_presets = (override.get("detection") or {}).get("presets")
+    if isinstance(user_presets, dict):
+        presets = {**(defaults_["detection"]["presets"] or {}), **user_presets}
+        raw["detection"] = {**raw["detection"],
+                            "presets": {k: v for k, v in presets.items() if v is not None}}
+    return _apply_preset(raw, defaults_) if apply_preset else raw
 
 
 def from_override(override: dict) -> Config:

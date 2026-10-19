@@ -120,14 +120,41 @@ Tabs:
 - **Detections**: the latest entries of the detection log, filterable. No
   images, just hosts, labels and scores.
 - **Video**: video jobs with their progress, and a button to cancel them.
-- **Settings**: every option in `defaults.yaml` with its comment. Saving
-  writes `config/config.yaml`, keeping its comments, and applies the change
-  at once. Options marked "restart" (ports, the video cache and slots) take
-  effect after `docker compose restart`.
+- **Settings**: two switches, plus every option in Custom mode.
+  - **Image model**: Fast (320n) or Slow (640m), one choice per entry in
+    `model.available` (its `label`). The video model has its own dropdown,
+    because 640m can't keep up with video.
+  - **Censoring level**: Strict (the detection defaults), Lax (exposed
+    breasts pass) or Custom.
+
+  Custom shows every option in `defaults.yaml` with its comment, starting
+  from the level you had; the other levels hide them and fix the detection
+  settings to the level's values. Saving writes `config/config.yaml`,
+  keeping its comments, and applies the change at once. Options marked
+  "restart" (ports, the video cache and slots) take effect after
+  `docker compose restart`. Add as many levels as
+  you like under `detection.presets` in `config/config.yaml`, each with a
+  `description` and the detection `settings` it changes. They merge with the
+  built-in ones by name (`lax: null` removes one), and each appears as a
+  choice:
+
+  ```yaml
+  detection:
+    presets:
+      genitals-only:
+        description: Only exposed genitalia are censored.
+        settings:
+          female_labels: [FEMALE_GENITALIA_EXPOSED]
+          unsexed_labels: []
+  ```
+
 - **PIN lock**: an optional 4-12 digit PIN, stored hashed as
-  `admin.pin_hash`. Five wrong PINs in a row lock attempts out for five
-  minutes, and an unlocked panel locks again after 15 idle minutes. Forgot it?
-  Delete `admin.pin_hash` from `config/config.yaml` and restart.
+  `admin.pin_hash`. While locked, the whole panel shows only the PIN prompt.
+  A wrong PIN never locks anyone out. Each one is recorded in
+  `logs/admin-attempts.jsonl` (`admin.attempts_log`) with its time, the
+  address used and the browser. After the next unlock they're listed at the
+  top of the panel until dismissed. An unlocked panel locks again after 15
+  idle minutes.
 
 Any page you visit can send requests to both addresses, so the panel refuses
 other `Host` names (DNS rebinding) and any write that isn't JSON from its own

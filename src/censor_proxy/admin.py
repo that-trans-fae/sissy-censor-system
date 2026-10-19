@@ -15,10 +15,16 @@ Any page you browse can send requests to both, so:
   - the panel can't be framed.
 
   GET  /admin/                     the panel
-  GET  /admin/api/session          {pin_set, unlocked, retry_after}
+  GET  /admin/api/session          {pin_set, unlocked}
   POST /admin/api/unlock           {pin}
   POST /admin/api/lock
   POST /admin/api/pin              {current, new}: set, change or (new: null) remove
+  GET  /admin/api/attempts         wrong PIN entries not yet dismissed
+  POST /admin/api/attempts/ack     dismiss them
+
+With a PIN set, everything but the page itself, session and unlock answers
+401 until unlocked. Wrong PINs are never locked out; they are recorded
+(admin.attempts_log) and reported after the next unlock.
   GET  /admin/api/status
   GET  /admin/api/log
   GET  /admin/api/jobs
@@ -39,7 +45,6 @@ import hmac
 import io
 import json
 import logging
-import math
 import os
 import re
 import secrets
@@ -70,7 +75,10 @@ RESTART_KEYS = frozenset({"proxy.internal_port", "admin.enabled", "admin.bind", 
                           "video.cache_dir", "video.max_concurrent_jobs"})
 # Managed through their own endpoints, never shown or set as plain settings.
 HIDDEN_KEYS = frozenset({"admin.pin_hash"})
-NULLABLE_KEYS = frozenset({"logging.path", "detection.label_thresholds"})
+# Settable, but edited in config.yaml rather than shown as fields: the panel
+# offers them as choices (the censoring level, the model list).
+NOT_SHOWN_KEYS = frozenset({"detection.presets", "model.available"})
+NULLABLE_KEYS = frozenset({"logging.path", "detection.label_thresholds", "admin.attempts_log"})
 PIN = re.compile(r"^\d{4,12}$")
 COOKIE = "scs_admin"
 PBKDF2_ITERATIONS = 200_000
@@ -116,23 +124,17 @@ def verify_pin(pin: str, stored: str) -> bool:
 
 
 class PinLock:
-    """Sessions and wrong-PIN lockout. Everything is in memory: a restart
-    locks the panel again."""
+    """Unlocked sessions, in memory: a restart locks the panel again."""
 
     def __init__(self, cfg: AdminConfig, clock=time.monotonic):
         self.cfg = cfg
         self._clock = clock
         self._sessions: dict[str, float] = {}  # token -> last use
-        self._failures = 0
-        self._locked_until = 0.0
         self._lock = threading.Lock()
 
     @property
     def pin_set(self) -> bool:
         return bool(self.cfg.pin_hash)
-
-    def retry_after(self) -> int:
-        return max(0, math.ceil(self._locked_until - self._clock()))
 
     def valid(self, token: str | None, touch: bool = True) -> bool:
         if not self.pin_set:
@@ -148,27 +150,11 @@ class PinLock:
                 self._sessions[token] = now
             return True
 
-    def check(self, pin: str) -> None:
-        """Raise unless `pin` is right. Attempts are serialised and slow
-        (PBKDF2), and too many wrong ones in a row lock attempts out."""
+    def check(self, pin: str) -> bool:
+        """Whether `pin` is right. Checks are serialised and slow (PBKDF2),
+        which paces guessing without ever locking anyone out."""
         with self._lock:
-            if wait := self.retry_after():
-                raise AdminError(429, f"Too many wrong PINs. Try again in {wait} s.",
-                                 retry_after=wait)
-            if verify_pin(str(pin), self.cfg.pin_hash or ""):
-                self._failures = 0
-                return
-            self._failures += 1
-            if self._failures >= self.cfg.pin_max_attempts:
-                self._failures = 0
-                self._locked_until = self._clock() + self.cfg.pin_lockout_seconds
-                wait = self.retry_after()
-                log.warning("admin: %d wrong PINs, attempts refused for %d s",
-                            self.cfg.pin_max_attempts, wait)
-                raise AdminError(429, f"Too many wrong PINs. Try again in {wait} s.",
-                                 retry_after=wait)
-            raise AdminError(403, "Wrong PIN.",
-                             attempts_left=self.cfg.pin_max_attempts - self._failures)
+            return verify_pin(str(pin), self.cfg.pin_hash or "")
 
     def open_session(self) -> str:
         token = secrets.token_urlsafe(32)
@@ -183,6 +169,61 @@ class PinLock:
     def close_all(self) -> None:
         with self._lock:
             self._sessions.clear()
+
+
+class AttemptLog:
+    """Wrong PIN entries, kept until dismissed in the panel. Appended to
+    admin.attempts_log (JSONL) so a restart doesn't hide them; entries that
+    can't be written are kept in memory."""
+
+    def __init__(self, path: str | None):
+        self.path = Path(path) if path else None
+        self._memory: list[dict] = []
+        self._lock = threading.Lock()
+
+    def _append(self, entry: dict) -> None:
+        with self._lock:
+            if self.path:
+                try:
+                    self.path.parent.mkdir(parents=True, exist_ok=True)
+                    with self.path.open("a") as f:
+                        f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+                    return
+                except OSError as e:
+                    log.warning("admin: can't write %s: %s", self.path, e)
+            self._memory.append(entry)
+
+    def record(self, action: str, via: str, user_agent: str | None) -> None:
+        log.warning("admin: wrong PIN (%s, via %s)", action, via)
+        self._append({"ts": time.time(), "event": "wrong_pin", "action": action, "via": via,
+                      "user_agent": (user_agent or "")[:300]})
+
+    def acknowledge(self) -> None:
+        self._append({"ts": time.time(), "event": "acknowledged"})
+
+    def unacknowledged(self) -> list[dict]:
+        """Wrong PIN entries since the last dismissal, oldest first."""
+        entries: list[dict] = []
+        if self.path and self.path.is_file():
+            with self._lock, self.path.open("rb") as f:
+                f.seek(0, os.SEEK_END)
+                start = max(0, f.tell() - LOG_TAIL_BYTES)
+                f.seek(start)
+                lines = f.read().splitlines()[1 if start else 0:]
+            for line in lines:
+                try:
+                    entries.append(json.loads(line))
+                except ValueError:
+                    continue
+        with self._lock:
+            entries = sorted(entries + self._memory, key=lambda e: e.get("ts", 0))
+        pending: list[dict] = []
+        for e in entries:
+            if e.get("event") == "acknowledged":
+                pending = []
+            elif e.get("event") == "wrong_pin":
+                pending.append(e)
+        return pending
 
 
 # -- the user config file ---------------------------------------------------
@@ -260,6 +301,7 @@ class UserConfigFile:
             raise AdminError(409, "No config file is set (CENSOR_CONFIG), so nothing can be saved.")
         defaults = config.defaults()
         doc = self.read()
+        before = self._preset(doc)
         for dotted, value in sets.items():
             section, key = _split(dotted, defaults, allow_hidden)
             _check_type(dotted, value, defaults[section][key])
@@ -273,11 +315,42 @@ class UserConfigFile:
                 doc[section][key] = value
         for dotted in resets:
             _remove(doc, *_split(dotted, defaults, allow_hidden))
+        self._check_preset(doc, before, [*sets, *resets], defaults)
         try:
             cfg = config.from_override(_plain(doc))
         except ConfigError as e:
             raise AdminError(400, str(e)) from e
         return doc, cfg
+
+    @staticmethod
+    def _preset(doc: CommentedMap) -> tuple[str, dict]:
+        """(preset name, presets) as the file has them, before applying."""
+        try:
+            d = config.merged(_plain(doc), apply_preset=False)["detection"]
+        except ConfigError as e:
+            raise AdminError(400, str(e)) from e
+        return d["preset"], d["presets"] or {}
+
+    def _check_preset(self, doc: CommentedMap, before: tuple[str, dict],
+                      changed: list[str], defaults: dict) -> None:
+        """Detection keys are the preset's while one is chosen. Switching to
+        custom with no custom keys saved starts from the previous preset."""
+        name, presets = self._preset(doc)
+        detection_keys = [k for k in changed if k.startswith("detection.")
+                          and k.split(".", 1)[1] not in config.PRESET_KEYS]
+        if name != config.CUSTOM_PRESET:
+            if detection_keys:
+                raise AdminError(400, f"Detection settings come from the {name} level. "
+                                      "Choose Custom to set them yourself.")
+            return
+        old, old_presets = before
+        saved = doc.get("detection")
+        if (old == config.CUSTOM_PRESET or not isinstance(saved, dict)
+                or any(k not in config.PRESET_KEYS for k in saved)):
+            return
+        for key, value in ((old_presets.get(old) or {}).get("settings") or {}).items():
+            if key not in detection_keys and value != defaults["detection"][key]:
+                doc["detection"][key] = value
 
     def write(self, doc: CommentedMap) -> None:
         buf = io.StringIO()
@@ -385,6 +458,7 @@ class AdminServer:
         self.app = app
         self.file = config_file
         self.pin = PinLock(cfg.admin)
+        self.attempts = AttemptLog(cfg.admin.attempts_log)
         # Startup values, to tell which restart-only settings are pending.
         try:
             self.boot = config.merged(config_file.override())
@@ -414,6 +488,8 @@ class AdminServer:
     def reconfigure(self, cfg: Config) -> None:
         self.cfg = cfg
         self.pin.cfg = cfg.admin
+        if cfg.admin.attempts_log != (str(self.attempts.path) if self.attempts.path else None):
+            self.attempts = AttemptLog(cfg.admin.attempts_log)
 
     def update(self, sets: dict[str, Any], resets: Iterable[str], allow_hidden: bool = False) -> Config:
         """Validate, apply to the running proxy, then save. If saving fails
@@ -462,7 +538,7 @@ class AdminServer:
             keys = []
             for key, default in values.items():
                 dotted = f"{section}.{key}"
-                if dotted in HIDDEN_KEYS:
+                if dotted in HIDDEN_KEYS or dotted in NOT_SHOWN_KEYS:
                     continue
                 value = current[section][key]
                 keys.append({
@@ -475,8 +551,21 @@ class AdminServer:
                                        and value != self.boot.get(section, {}).get(key),
                 })
             sections.append({"name": section, "keys": keys})
+        detection = current["detection"]
+        presets = detection["presets"] or {}
+        models = []
+        for m in current["model"]["available"] or ():
+            path = m.get("path") or None
+            models.append({"name": m.get("name"), "label": m.get("label") or m.get("name"),
+                           "description": m.get("description") or "",
+                           "path": path, "resolution": m.get("resolution"),
+                           "installed": path is None or Path(path).is_file()})
         return {"path": str(self.file.path) if self.file.path else None,
-                "editable": self.file.editable, "error": error, "sections": sections}
+                "editable": self.file.editable, "error": error, "sections": sections,
+                "preset": {"active": detection["preset"],
+                           "options": [{"name": n, "description": (p or {}).get("description") or ""}
+                                       for n, p in presets.items()]},
+                "models": models}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -591,6 +680,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             self._read_body()
             origin, https = self._host()
+            self._via = origin.split("://", 1)[1]
             path = urlsplit(self.path).path
             if method == "GET" and path in ("/", "/admin"):
                 return self._send(HTTPStatus.FOUND, b"", "text/plain", [("Location", "/admin/")])
@@ -614,12 +704,11 @@ class _Handler(BaseHTTPRequestHandler):
         admin, pin = self.admin, self.admin.pin
         token = self._token()
         if (method, name) == ("GET", "session"):
-            return self._json(200, {"pin_set": pin.pin_set, "unlocked": pin.valid(token, touch=False),
-                                    "retry_after": pin.retry_after()})
+            return self._json(200, {"pin_set": pin.pin_set, "unlocked": pin.valid(token, touch=False)})
         if (method, name) == ("POST", "unlock"):
             if not pin.pin_set:
                 return self._json(200, {"unlocked": True})
-            pin.check(self._body().get("pin", ""))
+            self._check_pin(self._body().get("pin", ""), "unlock")
             pin.close(token)
             return self._json(200, {"unlocked": True}, [self._cookie(pin.open_session(), https)])
 
@@ -631,8 +720,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {"unlocked": not pin.pin_set}, [self._cookie(None, https)])
         if (method, name) == ("POST", "pin"):
             return self._set_pin(self._body(), https)
+        if (method, name) == ("GET", "attempts"):
+            return self._json(200, {"attempts": admin.attempts.unacknowledged()})
+        if (method, name) == ("POST", "attempts/ack"):
+            admin.attempts.acknowledge()
+            return self._json(200, {"attempts": []})
         if (method, name) == ("GET", "status"):
             return self._json(200, {**admin.app.status(), "pin_set": pin.pin_set,
+                                    "wrong_pin_entries": len(admin.attempts.unacknowledged()),
                                     "config_path": str(admin.file.path) if admin.file.path else None,
                                     "config_editable": admin.file.editable})
         if (method, name) == ("GET", "log"):
@@ -670,11 +765,17 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, admin.config_view())
         raise AdminError(404, "not found")
 
+    def _check_pin(self, pin: Any, action: str) -> None:
+        """Raise 403 on a wrong PIN, after recording it for the report."""
+        if not self.admin.pin.check(str(pin)):
+            self.admin.attempts.record(action, self._via, self.headers.get("User-Agent"))
+            raise AdminError(403, "Wrong PIN.")
+
     def _set_pin(self, body: dict, https: bool) -> None:
         admin, pin = self.admin, self.admin.pin
         new = body.get("new") or None
         if pin.pin_set:
-            pin.check(str(body.get("current") or ""))
+            self._check_pin(body.get("current") or "", "change PIN" if new else "remove PIN")
         if new is not None and not PIN.match(str(new)):
             raise AdminError(400, "A PIN is 4 to 12 digits.")
         if new is None and not pin.pin_set:

@@ -95,33 +95,42 @@
   // ---- lock -------------------------------------------------------------
 
   let session = { pin_set: false, unlocked: true };
-  let retryTimer;
 
   function showLocked() {
     stopPolling();
     session.unlocked = false;
     $("tabs").hidden = true;
     $("lock-now").hidden = true;
+    $("attempts").hidden = true;
     for (const s of document.querySelectorAll("section.tab")) s.hidden = true;
     $("locked").hidden = false;
     $("unlock-pin").value = "";
     $("unlock-pin").focus();
   }
 
-  function showRetry(seconds) {
-    const err = $("unlock-error");
-    const btn = $("unlock-form").querySelector("button");
-    clearInterval(retryTimer);
-    let left = seconds;
-    const tick = () => {
-      if (left <= 0) { clearInterval(retryTimer); err.textContent = ""; btn.disabled = false; return; }
-      err.textContent = `Too many wrong PINs. Try again in ${left} s.`;
-      btn.disabled = true;
-      left -= 1;
-    };
-    tick();
-    retryTimer = setInterval(tick, 1000);
+  // Wrong PIN entries since the report was last dismissed.
+  async function loadAttempts() {
+    let data;
+    try { data = await api("attempts", { background: true }); } catch (_) { return; }
+    const attempts = data.attempts || [];
+    $("attempts").hidden = attempts.length === 0;
+    if (!attempts.length) return;
+    $("attempts-title").textContent =
+      `${attempts.length} wrong PIN entr${attempts.length === 1 ? "y" : "ies"}`;
+    $("attempts-list").replaceChildren(...attempts.slice().reverse().map((a) => h("li", {},
+      h("span", { class: "time", text: new Date(a.ts * 1000).toLocaleString() }),
+      h("span", { text: a.action === "unlock" ? "unlocking" : a.action }),
+      h("span", { class: "muted", text: `via ${a.via}` }),
+      a.user_agent ? h("span", { class: "ua", text: a.user_agent }) : null)));
   }
+
+  $("attempts-ack").addEventListener("click", async () => {
+    try { await api("attempts/ack", { method: "POST", body: {} }); } catch (err) {
+      if (err.status !== 401) toast(err.message, true);
+      return;
+    }
+    $("attempts").hidden = true;
+  });
 
   $("unlock-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -132,9 +141,8 @@
       showApp();
     } catch (err) {
       $("unlock-pin").value = "";
-      if (err.data && err.data.retry_after) return showRetry(err.data.retry_after);
-      const left = err.data && err.data.attempts_left;
-      $("unlock-error").textContent = err.message + (left ? ` ${left} attempt${left === 1 ? "" : "s"} left.` : "");
+      $("unlock-error").textContent = err.message;
+      $("unlock-pin").focus();
     }
   });
 
@@ -155,6 +163,7 @@
     $("locked").hidden = true;
     $("tabs").hidden = false;
     $("lock-now").hidden = !session.pin_set;
+    loadAttempts();
     const wanted = location.hash.slice(1);
     showTab(TABS.includes(wanted) ? wanted : "overview");
   }
@@ -186,6 +195,9 @@
       return;
     }
     if (s.brand_name) $("brand-name").textContent = s.brand_name;
+    // The counts live in memory, so a restart starts them again.
+    $("overview-note").textContent = `Counts since the proxy started ${fmtDuration(s.uptime_seconds)} ago. `
+      + `Updated ${new Date().toLocaleTimeString()}.`;
     const c = s.counts || {};
     const tiles = [
       ["Censored", c.censored, true], ["Clean", c.clean], ["Whitelisted", c.whitelisted],
@@ -198,7 +210,8 @@
     const dl = (rows) => rows.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", {}, v)]);
     $("info-detection").replaceChildren(...dl([
       ["Status", s.ready ? "Ready" : "Starting"],
-      ["Image model", `${s.model} at ${s.resolution}px${s.tiling ? ", tiling" : ""}`],
+      ["Censoring level", title(s.preset)],
+      ["Image model", `${s.model}${s.tiling ? ", tiling" : ""}`],
       ["Video", s.video.enabled ? `on, ${s.video.model}` : "off"],
       ["Censor style", s.censor_style],
       ["On failure", s.fail_closed ? "censor the whole image" : "deliver unmodified"],
@@ -382,9 +395,20 @@
   // ---- settings ---------------------------------------------------------
 
   const SKIP_SECTIONS = new Set(["whitelist"]);  // has its own tab
+  const SKIP_KEYS = new Set(["detection.preset"]);  // the level picker above the sections
+  // Pairs of keys shown as one model picker (choices from model.available).
+  const MODEL_PICKERS = { model: ["path", "resolution"], video: ["model_path", "model_resolution"] };
+  const CUSTOM = "custom";
   const isNum = (v) => typeof v === "number";
+  const title = (name) => name.charAt(0).toUpperCase() + name.slice(1);
+
+  // A path of null is the bundled 320n, whatever the resolution says.
+  function modelIndex(models, [path, resolution]) {
+    return models.findIndex((m) => m.path === path && (path === null || m.resolution === resolution));
+  }
 
   function kindOf(k) {
+    if (k.models) return "model";
     const d = k.default, v = k.value;
     if (typeof d === "boolean") return "bool";
     if (isNum(d)) return "number";
@@ -399,6 +423,11 @@
   const dictText = (v) => Object.entries(v || {}).map(([a, b]) => `${a}: ${b}`).join("\n");
 
   function readField(kind, el, k) {
+    if (kind === "model") {
+      if (el.value === "other") return k.value;
+      const m = k.models[Number(el.value)];
+      return [m.path, m.resolution];
+    }
     if (kind === "bool") return el.checked;
     if (kind === "number") {
       if (el.value.trim() === "") throw new Error(`${k.key}: enter a number`);
@@ -423,7 +452,10 @@
   }
 
   function fillField(kind, el, value) {
-    if (kind === "bool") el.checked = !!value;
+    if (kind === "model") {
+      const i = modelIndex(el.models, value);
+      el.value = i >= 0 ? String(i) : "other";
+    } else if (kind === "bool") el.checked = !!value;
     else if (kind === "number") el.value = value;
     else if (kind === "string") el.value = value === null ? "" : value;
     else if (kind === "dict") el.value = dictText(value);
@@ -449,11 +481,75 @@
       : "No config file is set (CENSOR_CONFIG): settings can't be saved.";
     if (view.error) $("cfg-error").textContent = view.error;
     $("cfg-reload").disabled = !view.path;
-    $("cfg-sections").replaceChildren(...view.sections.filter((s) => !SKIP_SECTIONS.has(s.name))
-      .map((s) => renderSection(s, view.editable)));
+    renderSpeeds(view);
+    renderLevels(view);
+    // Every individual setting is shown only in custom mode.
+    const custom = view.preset.active === CUSTOM;
+    $("cfg-file").hidden = !custom;
+    $("cfg-sections").replaceChildren(...(custom ? view.sections : [])
+      .filter((s) => !SKIP_SECTIONS.has(s.name)).map((s) => renderSection(s, view)));
   }
 
-  function renderSection(section, editable) {
+  // The image model switch: one choice per model.available entry.
+  function renderSpeeds(view) {
+    const current = [setting(view, "model", "path").value, setting(view, "model", "resolution").value];
+    const active = modelIndex(view.models, current);
+    $("speeds").replaceChildren(...view.models.map((m, i) => h("button", {
+      type: "button", class: "level" + (i === active ? " active" : ""), role: "radio",
+      "aria-checked": i === active ? "true" : "false", disabled: !view.editable || !m.installed,
+      onclick: async () => {
+        if (i === active) return;
+        $("cfg-error").textContent = "";
+        try {
+          renderSettings(await saveSettings({ "model.path": m.path, "model.resolution": m.resolution }));
+          toast(`Image model: ${m.label}`);
+        } catch (err) {
+          if (err.status !== 401) $("cfg-error").textContent = err.message;
+        }
+      },
+    }, h("span", { class: "title", text: m.label }),
+       h("span", { class: "desc", text: `${m.name}. ${m.description}${m.installed ? "" : " Not installed."}` }))));
+  }
+
+  function renderLevels(view) {
+    const active = view.preset.active;
+    const options = [...view.preset.options, {
+      name: CUSTOM,
+      description: "Shows every setting below so you can set each one yourself. Starts from the level you had.",
+    }];
+    $("levels").replaceChildren(...options.map((o) => h("button", {
+      type: "button", class: "level" + (o.name === active ? " active" : ""), role: "radio",
+      "aria-checked": o.name === active ? "true" : "false", disabled: !view.editable,
+      onclick: async () => {
+        if (o.name === active) return;
+        $("cfg-error").textContent = "";
+        try {
+          renderSettings(await saveSettings({ "detection.preset": o.name }));
+          toast(`Censoring level: ${title(o.name)}`);
+        } catch (err) {
+          if (err.status !== 401) $("cfg-error").textContent = err.message;
+        }
+      },
+    }, h("span", { class: "title", text: title(o.name) }), h("span", { class: "desc", text: o.description }))));
+  }
+
+  // The section's keys, with each model picker's pair of keys as one field.
+  function sectionFields(section, view) {
+    const pair = MODEL_PICKERS[section.name];
+    const keys = section.keys.filter((k) => !SKIP_KEYS.has(`${section.name}.${k.key}`));
+    if (!pair) return keys;
+    const [a, b] = pair.map((name) => keys.find((k) => k.key === name));
+    if (!a || !b) return keys;
+    const picker = {
+      key: "model", keys: pair, models: view.models,
+      value: [a.value, b.value], default: [a.default, b.default],
+      help: "One of the models baked into the image (model.available).",
+    };
+    return keys.flatMap((k) => (k === a ? [picker] : k === b ? [] : [k]));
+  }
+
+  function renderSection(section, view) {
+    const editable = view.editable;
     const fields = [];
     const status = h("span", { class: "muted small" });
     const save = h("button", { type: "button", class: "primary", text: "Save", disabled: true });
@@ -480,10 +576,19 @@
       status.textContent = dirty ? `${dirty} unsaved change${dirty === 1 ? "" : "s"}` : "";
     };
 
-    for (const k of section.keys) {
+    for (const k of sectionFields(section, view)) {
       const kind = kindOf(k);
       let el;
-      if (kind === "bool") el = h("input", { type: "checkbox" });
+      if (kind === "model") {
+        el = h("select", { class: "combo" }, k.models.map((m, i) => h("option", {
+          value: String(i), disabled: !m.installed,
+          text: `${m.label} (${m.name}): ${m.description}${m.installed ? "" : " (not installed)"}`,
+        })));
+        if (modelIndex(k.models, k.value) < 0) {
+          el.append(h("option", { value: "other", text: `Other: ${k.value[0] || "bundled"} at ${k.value[1]}` }));
+        }
+        el.models = k.models;
+      } else if (kind === "bool") el = h("input", { type: "checkbox" });
       else if (kind === "number") el = h("input", { type: "number", step: "any" });
       else if (kind === "string") el = h("input", { type: "text", spellcheck: "false", placeholder: k.nullable ? "null" : "" });
       else el = h("textarea", { spellcheck: "false", rows: Math.min(8, Math.max(2, (k.value && Object.keys(k.value).length || 1) + 1)) });
@@ -495,7 +600,9 @@
 
       const resetBtn = h("button", { type: "button", class: "link", text: "Use default",
         onclick: () => { fillField(kind, el, k.default); refresh(); } });
-      const defaultText = kind === "dict" ? dictText(k.default) : Array.isArray(k.default) ? listText(k.default).replace(/\n/g, ", ")
+      const defaultModel = kind === "model" ? k.models[modelIndex(k.models, k.default)] : null;
+      const defaultText = kind === "model" ? (defaultModel ? defaultModel.name : String(k.default[0]))
+        : kind === "dict" ? dictText(k.default) : Array.isArray(k.default) ? listText(k.default).replace(/\n/g, ", ")
         : k.default === null ? "null" : String(k.default);
       const row = h("div", { class: "field" },
         h("div", {},
@@ -519,7 +626,9 @@
       try {
         for (const f of fields) {
           const v = readField(f.kind, f.el, f.k);
-          if (!same(v, f.k.value)) set[`${section.name}.${f.k.key}`] = v;
+          if (same(v, f.k.value)) continue;
+          if (f.kind === "model") f.k.keys.forEach((key, i) => { set[`${section.name}.${key}`] = v[i]; });
+          else set[`${section.name}.${f.k.key}`] = v;
         }
       } catch (err) { $("cfg-error").textContent = err.message; return; }
       save.disabled = true;
@@ -585,9 +694,7 @@
       $("pin-ok").textContent = message;
     } catch (err) {
       if (err.status === 401) return;
-      if (err.data && err.data.retry_after) { showLocked(); showRetry(err.data.retry_after); return; }
-      const left = err.data && err.data.attempts_left;
-      $("pin-error").textContent = err.message + (left ? ` ${left} attempt${left === 1 ? "" : "s"} left.` : "");
+      $("pin-error").textContent = err.message;
     }
   }
 
@@ -613,9 +720,7 @@
 
   (async () => {
     try { session = await api("session"); } catch (err) { toast(err.message, true); return; }
-    if (session.pin_set && !session.unlocked) {
-      showLocked();
-      if (session.retry_after) showRetry(session.retry_after);
-    } else showApp();
+    if (session.pin_set && !session.unlocked) showLocked();
+    else showApp();
   })();
 })();

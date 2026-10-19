@@ -16,8 +16,43 @@ model:
   # regions lost when the whole frame is shrunk to the model's input, at
   # roughly 2-4x the inference time on those images.
   tiling: true
+  # Models the admin panel offers for model.* and video.model_*: a name, the
+  # label on the panel's image model switch, the weights (null: the 320n
+  # bundled with nudenet) and the resolution they need. The Docker image
+  # bakes in both of these.
+  available:
+    - name: 320n
+      label: Fast
+      description: About 0.25 s per image. Misses more.
+      path: null
+      resolution: 320
+    - name: 640m
+      label: Slow
+      description: More accurate, about 2 s per image with tiling.
+      path: /app/models/640m.onnx
+      resolution: 640
 
 detection:
+  # Censoring level: a name from `presets`, or custom. A preset sets every
+  # other detection key to the defaults below plus the preset's own
+  # settings; detection keys in config.yaml are kept but ignored. custom
+  # uses the detection keys from config.yaml. Picked at the top of the admin
+  # panel's Settings tab.
+  preset: strict
+  # Each preset's description and the detection keys it changes. Add as
+  # many as you like under detection.presets in config.yaml: they merge with
+  # these by name (the same name replaces one, null removes it), and each
+  # shows up as a choice in the admin panel.
+  presets:
+    strict:
+      description: Exposed breasts, genitalia, buttocks and anus are censored.
+      settings: {}
+    lax:
+      description: Like strict, but exposed breasts pass. They still count as
+        female context, so buttocks next to them stay censored.
+      settings:
+        female_labels:
+          - FEMALE_GENITALIA_EXPOSED
   # Minimum score for a box to be censored. Set low on purpose: false
   # positives are preferred to misses.
   threshold: 0.3
@@ -258,10 +293,11 @@ admin:
   # PIN lock, set from the panel and stored hashed. null: no lock. To reset
   # a forgotten PIN, delete this key from config.yaml and restart.
   pin_hash: null
-  # Wrong PINs allowed in a row before the panel refuses attempts for
-  # pin_lockout_seconds.
-  pin_max_attempts: 5
-  pin_lockout_seconds: 300
+  # Wrong PIN entries are never locked out. They are recorded here (time and
+  # the address the panel was opened on) and listed in the panel after the
+  # next unlock until dismissed. A file, so a restart doesn't clear them;
+  # null keeps them in memory only.
+  attempts_log: /logs/admin-attempts.jsonl
   # An unlocked panel locks again after this long without use (the panel's
   # own auto-refresh doesn't count as use).
   session_seconds: 900

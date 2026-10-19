@@ -53,7 +53,7 @@ def test_unsexed_far_from_male_is_unattributed(cfg):
 
 
 def test_male_exemption_can_be_disabled(make_config):
-    cfg = make_config("detection: {male_context_exempts: false}\n")
+    cfg = make_config("detection: {preset: custom, male_context_exempts: false}\n")
     ds = decide([det("BUTTOCKS_EXPOSED", box=(0, 0, 100, 100)),
                  det("FACE_MALE", box=(100, 0, 30, 30))], cfg.detection)
     assert censored(ds) == ["BUTTOCKS_EXPOSED"]

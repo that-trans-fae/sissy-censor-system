@@ -34,6 +34,15 @@
 </header>
 
 <main>
+  <div class="card alert" id="attempts" role="alert" hidden>
+    <div class="alert-head">
+      <h2 id="attempts-title"></h2>
+      <button type="button" class="ghost" id="attempts-ack">Dismiss</button>
+    </div>
+    <p class="muted small">Someone entered a wrong PIN since this report was last dismissed.</p>
+    <ul class="attempt-list" id="attempts-list"></ul>
+  </div>
+
   <section id="locked" class="locked" hidden>
     <div class="card narrow">
       <h1>Panel locked</h1>
@@ -48,6 +57,7 @@
   </section>
 
   <section id="overview" class="tab" hidden>
+    <p class="muted small" id="overview-note"></p>
     <div class="grid" id="stat-tiles"></div>
     <div class="grid two">
       <div class="card"><h2>Detection</h2><dl id="info-detection"></dl></div>
@@ -113,14 +123,22 @@
   </section>
 
   <section id="settings" class="tab" hidden>
+    <p class="error card" id="cfg-error" role="alert"></p>
     <div class="card">
+      <h2>Image model</h2>
+      <div class="levels" id="speeds" role="radiogroup" aria-label="Image model"></div>
+    </div>
+    <div class="card">
+      <h2>Censoring level</h2>
+      <div class="levels" id="levels" role="radiogroup" aria-label="Censoring level"></div>
+    </div>
+    <div id="cfg-sections"></div>
+    <div class="card" id="cfg-file" hidden>
       <div class="toolbar">
         <p class="muted small grow" id="cfg-path"></p>
         <button class="ghost" id="cfg-reload" title="Re-read config.yaml after editing it by hand">Reload from file</button>
       </div>
-      <p class="error" id="cfg-error" role="alert"></p>
     </div>
-    <div id="cfg-sections"></div>
   </section>
 
   <section id="lock" class="tab" hidden>
@@ -141,8 +159,6 @@
         <p class="error" id="pin-error" role="alert"></p>
         <p class="ok" id="pin-ok" role="status"></p>
       </form>
-      <p class="muted small">Forgot the PIN? Delete <code>admin.pin_hash</code> from
-        <code>config.yaml</code> and restart the container.</p>
     </div>
   </section>
 </main>

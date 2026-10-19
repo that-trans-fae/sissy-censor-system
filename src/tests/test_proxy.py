@@ -192,6 +192,6 @@ def test_whitelisted_pages_pass_unscanned(site, proxy):
 def test_admin_host_routed_to_panel(proxy):
     opener, _ = proxy
     with opener.open("http://scs.local/admin/api/session", timeout=30) as r:
-        assert json.loads(r.read()) == {"pin_set": False, "unlocked": True, "retry_after": 0}
+        assert json.loads(r.read()) == {"pin_set": False, "unlocked": True}
     with opener.open("http://scs.local/admin/", timeout=30) as r:
         assert b"admin.js" in r.read()
