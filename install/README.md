@@ -44,7 +44,7 @@ reaches it over TCP instead of HTTP/3 with a CAPTCHA on every search, and
 an HTTP proxy can't carry HTTP/3. The installer locks SafeSearch on instead,
 with Chromium's `ForceGoogleSafeSearch` policy (a file in the managed-policy
 directory on Linux, written with sudo; the app's user defaults on macOS; the
-user's registry hive on Windows), so results are filtered at Google's end
+machine's policy key on Windows, through a UAC prompt), so results are filtered at Google's end
 and the setting can't be turned off from the page. The policy covers every
 profile of that Chromium, not only the Sissy Browser. Image Search
 thumbnails still load through the proxy and are censored.

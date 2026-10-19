@@ -50,10 +50,10 @@ $ProxyPort = 8080
 # Google search goes around the proxy. Google answers a Chromium that reaches
 # it over TCP instead of QUIC (HTTP/3) with a CAPTCHA on every search, and an
 # HTTP proxy can't carry QUIC. The browser connects directly, and the
-# ForceGoogleSafeSearch policy (Install-SafeSearchPolicy) keeps its searches
+# ForceGoogleSafeSearch policy (Set-SafeSearchPolicy) keeps its searches
 # filtered at Google's end (docs/decisions.md).
 $ProxyBypass = 'www.google.com'
-$PolicyKey = 'HKCU:\Software\Policies\Chromium'
+$PolicyKey = 'HKLM:\Software\Policies\Chromium'
 $CaPem = Join-Path $ScsDir 'mitmproxy\mitmproxy-ca-cert.pem'
 $UpdateTask = 'Sissy Censor System update'
 $DockerDesktopExe = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
@@ -472,15 +472,28 @@ function Install-Shortcuts($chromium) {
 
 # Locks SafeSearch on in Chromium (ForceGoogleSafeSearch), since Google
 # search doesn't go through the proxy. Policies are per Chromium install, not
-# per profile; the user's hive needs no elevation and every profile of that
-# Chromium gets it.
-function Install-SafeSearchPolicy {
-    Log 'Locking SafeSearch on in Chromium'
-    New-Item -Path $PolicyKey -Force | Out-Null
-    New-ItemProperty -Path $PolicyKey -Name ForceGoogleSafeSearch -Value 1 -PropertyType DWord -Force | Out-Null
-}
-function Uninstall-SafeSearchPolicy {
-    Remove-ItemProperty -Path $PolicyKey -Name ForceGoogleSafeSearch -ErrorAction SilentlyContinue
+# per profile, and every Policies key is admin-only (HKCU's included), so an
+# elevated PowerShell writes the machine key. Nothing is asked when the value
+# is already as wanted; a declined prompt warns and the install goes on.
+function Set-SafeSearchPolicy([bool]$on) {
+    $current = (Get-ItemProperty -Path $PolicyKey -Name ForceGoogleSafeSearch -ErrorAction SilentlyContinue).ForceGoogleSafeSearch
+    if ($on -and $current -eq 1) { return }
+    if (-not $on -and $null -eq $current) { return }
+    if ($on) {
+        Log 'Locking SafeSearch on in Chromium (asks to run as administrator)'
+        $cmd = "New-Item -Path '$PolicyKey' -Force | Out-Null; " +
+               "New-ItemProperty -Path '$PolicyKey' -Name ForceGoogleSafeSearch -Value 1 -PropertyType DWord -Force | Out-Null"
+    } else {
+        Log 'Removing the SafeSearch lock from Chromium (asks to run as administrator)'
+        $cmd = "Remove-ItemProperty -Path '$PolicyKey' -Name ForceGoogleSafeSearch -ErrorAction SilentlyContinue"
+    }
+    try {
+        $p = Start-Process -Wait -PassThru -Verb RunAs -WindowStyle Hidden powershell.exe `
+            -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $cmd
+        if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+    } catch {
+        Warn "the SafeSearch policy was not changed ($_); Google search in $BrowserName is unfiltered until it is"
+    }
 }
 
 # Seeds the profile so the bookmark bar is shown with the admin panel on it.
@@ -676,7 +689,7 @@ function Uninstall {
         $removeWsl = Ask "$q?"
     }
     Uninstall-Shortcuts
-    Uninstall-SafeSearchPolicy
+    Set-SafeSearchPolicy $false
     Uninstall-Updater
     if ($removeDocker) { Remove-DockerDesktop } else { Remove-Proxy }
     if ($removeChromium) { Remove-Chromium $chromium }
@@ -697,7 +710,7 @@ try {
     Start-Proxy
     $chromium = Install-Chromium
     Install-Shortcuts $chromium
-    Install-SafeSearchPolicy
+    Set-SafeSearchPolicy $true
     Seed-Profile
     Trust-CaInProfile $chromium
     Install-Updater
