@@ -28,10 +28,10 @@ def test_lists_replace_wholesale(make_config):
     "nonsense: {}\n",
     "censor: {style: sparkles}\n",
     "logging: {level: verbose}\n",
-    "proxy: {passthrough_hosts: ['(']}\n",
+    "whitelist: {builtin: ['(']}\n",
+    "proxy: {passthrough_hosts: []}\n",  # now whitelist.builtin
     "images: {placeholder_delay_ms: -1}\n",
     "images: {placeholder_reserve_px: -1}\n",
-    "proxy: {extra_passthrough_hosts: ['(']}\n",
     "detection: {preset: custom, male_score_ratio: -1}\n",
     "detection: {preset: custom, male_priority_overlap: 0}\n",
 ])
@@ -114,15 +114,21 @@ def test_model_names(make_config):
     assert m.name_for("/other.onnx", 640) == "/other.onnx"
 
 
-def test_extra_passthrough_hosts_extend_defaults(make_config):
-    defaults = make_config().proxy.passthrough_hosts
-    cfg = make_config("proxy: {extra_passthrough_hosts: ['^bank\\.example:']}\n")
-    assert cfg.proxy.passthrough_hosts == defaults
-    assert cfg.proxy.ignore_hosts == defaults + ("^bank\\.example:",)
+def test_whitelist_domains_extend_builtin(make_config):
+    builtin = make_config().whitelist.builtin
+    cfg = make_config("whitelist: {domains: [my-bank.example]}\n")
+    wl = cfg.whitelist
+    assert wl.builtin == builtin
+    assert wl.patterns[:-1] == builtin
+    assert re.search(wl.patterns[-1], "login.my-bank.example:443")
+    assert not re.search(wl.patterns[-1], "notmy-bank.example:443")
+    assert wl.match("login.my-bank.example") == "my-bank.example"
+    assert "chase" in wl.match("www.chase.com")
+    assert wl.match("i.imgur.com") is None
 
 
 def _passed_through(cfg, host):
-    return any(re.search(p, f"{host}:443") for p in cfg.proxy.ignore_hosts)
+    return any(re.search(p, f"{host}:443") for p in cfg.whitelist.patterns)
 
 
 @pytest.mark.parametrize("host", [
@@ -131,7 +137,7 @@ def _passed_through(cfg, host):
     "www.53.com", "client.schwab.com", "sa.www4.irs.gov", "api.id.me",
     "www.nga.gov", "www.army.mil", "www.si.edu",
 ])
-def test_default_passthrough_covers(make_config, host):
+def test_builtin_whitelist_covers(make_config, host):
     assert _passed_through(make_config(), host)
 
 
@@ -142,5 +148,5 @@ def test_default_passthrough_covers(make_config, host):
     "www.paypalobjects.com", "i.imgur.com", "cdn.discordapp.com",
     "chase.com.example.net", "notchase.com", "gov.example.com", "edu.example.net",
 ])
-def test_default_passthrough_leaves_image_hosts(make_config, host):
+def test_builtin_whitelist_leaves_image_hosts(make_config, host):
     assert not _passed_through(make_config(), host)

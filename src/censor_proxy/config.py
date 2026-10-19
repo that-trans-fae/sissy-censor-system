@@ -153,30 +153,32 @@ class VideoConfig:
 
 @dataclass(frozen=True)
 class ProxyConfig:
-    passthrough_hosts: tuple[str, ...]
-    extra_passthrough_hosts: tuple[str, ...]
     health_host: str
     admin_host: str
     internal_port: int
-
-    @property
-    def ignore_hosts(self) -> tuple[str, ...]:
-        """Every passthrough pattern: the defaults plus the user's extras."""
-        return self.passthrough_hosts + self.extra_passthrough_hosts
 
 
 @dataclass(frozen=True)
 class WhitelistConfig:
     domains: tuple[str, ...]
+    builtin: tuple[str, ...]
     match_referer: bool
 
-    def match(self, host: str) -> str | None:
-        """The whitelisted domain covering `host` (itself or a parent), if any."""
+    @property
+    def patterns(self) -> tuple[str, ...]:
+        """Every whitelisted host as a regex on host:port (mitmproxy's
+        ignore_hosts): the built-in list, then the domains."""
+        return self.builtin + tuple(rf"(^|\.){re.escape(d)}:" for d in self.domains)
+
+    def match(self, host: str, port: int = 443) -> str | None:
+        """The whitelisted domain covering `host` (itself or a parent), or
+        the built-in pattern matching it, if any."""
         host = host.lower().rstrip(".")
         for domain in self.domains:
             if host == domain or host.endswith("." + domain):
                 return domain
-        return None
+        address = f"{host}:{port}"
+        return next((p for p in self.builtin if re.search(p, address, re.IGNORECASE)), None)
 
 
 @dataclass(frozen=True)
@@ -324,8 +326,6 @@ def _build(raw: dict[str, Any]) -> Config:
         ),
         "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ())}),
         "proxy": ProxyConfig(
-            passthrough_hosts=tuple(raw["proxy"]["passthrough_hosts"] or ()),
-            extra_passthrough_hosts=tuple(raw["proxy"]["extra_passthrough_hosts"] or ()),
             health_host=raw["proxy"]["health_host"],
             admin_host=str(raw["proxy"]["admin_host"]).lower(),
             internal_port=int(raw["proxy"]["internal_port"]),
@@ -333,6 +333,7 @@ def _build(raw: dict[str, Any]) -> Config:
         "whitelist": WhitelistConfig(
             domains=tuple(dict.fromkeys(normalize_domain(d)
                                         for d in raw["whitelist"]["domains"] or ())),
+            builtin=tuple(raw["whitelist"]["builtin"] or ()),
             match_referer=bool(raw["whitelist"]["match_referer"]),
         ),
         "admin": AdminConfig(**{
@@ -370,8 +371,7 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("censor.quality must be between 1 and 100")
     if len(cfg.censor.fill_color) != 3:
         raise ConfigError("censor.fill_color must be [R, G, B]")
-    for key, patterns in (("proxy.passthrough_hosts", cfg.proxy.passthrough_hosts),
-                          ("proxy.extra_passthrough_hosts", cfg.proxy.extra_passthrough_hosts),
+    for key, patterns in (("whitelist.builtin", cfg.whitelist.builtin),
                           ("video.hosts", cfg.video.hosts)):
         for pattern in patterns:
             try:

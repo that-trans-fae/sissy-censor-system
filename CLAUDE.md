@@ -113,8 +113,10 @@ ruamel.yaml, keeping comments, then calls the addon's `apply_config()`, which
 swaps the config on the event loop. A new config key gets a form field
 automatically (typed from its default, with help text from the comment above
 it in `defaults.yaml`). If the key is only read at startup, add it to
-`RESTART_KEYS`. Whitelisted flows (`whitelist.domains`, matched on host or
-Referer) are tagged in `request()` and streamed untouched.
+`RESTART_KEYS`. Whitelisted hosts (`whitelist.builtin` regexes plus
+`whitelist.domains`) go to mitmproxy's `ignore_hosts`, so they are never
+decrypted; requests whose Referer/Origin is a whitelisted page are tagged in
+`request()` and streamed untouched.
 
 ## Working conventions
 
@@ -152,7 +154,7 @@ Referer) are tagged in `request()` and streamed untouched.
   stream everything else); `tests/test_proxy.py` guards this.
 - Chromium (snap) only trusts the proxy CA through the `CACertificates`
   policy; the NSS database route registers it as an intermediate. Its
-  updater hosts are in the passthrough list because they ignore the policy.
+  updater hosts are on the built-in whitelist because they ignore the policy.
 - `src/mitmproxy/` holds the CA private key: never commit or share it.
 - `docker ps` truncates commands, so grepping its output for a script name
   silently matches nothing; use `--no-trunc` (or `--filter`) before killing

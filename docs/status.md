@@ -9,8 +9,8 @@ Last updated Oct 18, 2026.
 
 - Docker image (`src/Dockerfile`, `src/compose.yaml`) with mitmproxy, NudeNet
   320n (default) and 640m weights baked in
-- `censor.py` addon: Content-Type routing, passthrough hosts (a default list
-  plus `extra_passthrough_hosts`), size floor,
+- `censor.py` addon: Content-Type routing, the whitelist (built-in hosts plus
+  your domains, never intercepted), size floor,
   `censor.local/health`, fail-closed on errors and timeouts
 - `censor_bytes()` for JPEG, PNG, WebP and animated GIF/WebP, with frame
   sampling and a content-hash cache

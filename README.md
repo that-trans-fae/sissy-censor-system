@@ -80,8 +80,10 @@ keys are rejected at startup.
 - The proxy's CA can intercept all of your HTTPS traffic. Its private key
   lives in `src/mitmproxy/`: never commit or share it.
 - The port is bound to loopback only. Don't expose it to your network.
-- Hosts that can't be intercepted (certificate pinning, browser updaters) go
-  in `proxy.passthrough_hosts` and bypass interception entirely.
+- Whitelisted hosts bypass interception entirely: the built-in list covers
+  browser updaters, sign-in, password managers, payments, common banks and
+  .gov/.mil/.edu; add your own from the admin panel's Whitelist tab
+  (`whitelist.domains`).
 - Video injection extends every page's Content-Security-Policy to allow the
   injected script, and lets pages ask the proxy to fetch public video URLs.
   Narrow `video.hosts` to limit this. Private and loopback addresses are

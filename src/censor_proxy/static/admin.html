@@ -67,43 +67,29 @@
 
   <section id="whitelist" class="tab" hidden>
     <div class="card">
-      <h2>Whitelisted domains</h2>
-      <p class="muted">Everything from these domains passes through unscanned and unmodified:
-        no image or data-URI censoring and no video control. An entry covers its subdomains too.</p>
+      <h2>Whitelisted</h2>
+      <p class="muted">Connections to these domains aren't decrypted at all, so the proxy never
+        sees their logins or account pages, and nothing from them is censored: no image
+        censoring and no video control. An entry covers its subdomains too.</p>
       <form id="wl-form" class="row">
-        <input id="wl-input" type="text" placeholder="youtube.com" aria-label="Domain"
+        <input id="wl-input" type="text" placeholder="mybank.com" aria-label="Domain"
                autocomplete="off" spellcheck="false" required>
         <button type="submit" class="primary">Add</button>
       </form>
       <p class="error" id="wl-error" role="alert"></p>
       <ul class="chips" id="wl-list"></ul>
-      <p class="muted" id="wl-empty" hidden>No domains whitelisted. Everything is scanned.</p>
+      <p class="muted" id="wl-empty" hidden>None added. The built-in list below still applies.</p>
       <label class="check">
         <input type="checkbox" id="wl-referer">
         <span>Also pass what whitelisted pages load (by Referer), such as a site's own CDN
           images. This includes any third-party images or ads on those pages.</span>
       </label>
-    </div>
-    <div class="card">
-      <h2>Never intercepted</h2>
-      <p class="muted">Connections to these hosts aren't decrypted at all, so the proxy never sees
-        their logins or account pages, and nothing from them is censored. Use it for banks,
-        health portals and sign-in pages; use the whitelist above for sites you just don't want
-        scanned. An entry covers its subdomains too.</p>
-      <form id="pt-form" class="row">
-        <input id="pt-input" type="text" placeholder="mybank.com" aria-label="Domain"
-               autocomplete="off" spellcheck="false" required>
-        <button type="submit" class="primary">Add</button>
-      </form>
-      <p class="error" id="pt-error" role="alert"></p>
-      <ul class="chips" id="pt-list"></ul>
-      <p class="muted" id="pt-empty" hidden>None added. The built-in list below still applies.</p>
-      <details class="builtin" id="pt-builtin" open>
-        <summary>Built in <span class="count" id="pt-builtin-count"></span></summary>
+      <details class="builtin" open>
+        <summary>Built in <span class="count" id="wl-builtin-count"></span></summary>
         <p class="muted small">Browser updaters, sign-in providers, password managers, payment
           processors, common US banks and brokerages, and every .gov, .mil and .edu site
-          (<span class="mono">proxy.passthrough_hosts</span>).</p>
-        <ul class="chips readonly" id="pt-builtin-list"></ul>
+          (<span class="mono">whitelist.builtin</span>).</p>
+        <ul class="chips readonly" id="wl-builtin-list"></ul>
       </details>
     </div>
   </section>

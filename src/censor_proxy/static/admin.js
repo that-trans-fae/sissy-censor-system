@@ -219,7 +219,7 @@
     ]));
     $("info-proxy").replaceChildren(...dl([
       ["Uptime", fmtDuration(s.uptime_seconds)],
-      ["Whitelist", s.whitelist.length ? s.whitelist.join(", ") : "none"],
+      ["Whitelist", [...s.whitelist, "the built-in list"].join(", ")],
       ["Detection log", h("span", {}, s.log_level, s.log_path ? [" → ", h("code", { text: s.log_path })] : null)],
       ["Config file", s.config_path ? `${s.config_path}${s.config_editable ? "" : " (read-only)"}` : "none"],
       ["Panel", `https://${s.admin_host}/admin`],
@@ -265,17 +265,38 @@
       return;
     }
     renderWhitelist(view);
-    renderPassthrough(view);
+  }
+
+  // A built-in pattern (a regex on host:port) as the domains it covers, for
+  // display: one alternation group is expanded ("login\.(live|microsoftonline)\.com:"
+  // is two domains). Anything else regex-like is shown as written.
+  function readable(pattern) {
+    const s = pattern.replace(/^\(\^\|\\\.\)/, "").replace(/^\^/, "").replace(/:$/, "");
+    const m = s.match(/^([^()|]*)\(([^()]*)\)([^()|]*)$/);
+    const parts = m ? m[2].split("|").map((a) => m[1] + a + m[3]) : [s];
+    const plain = parts.map((p) => p.replace(/\\\./g, "."));
+    return plain.every((p) => /^[a-z0-9.-]+$/i.test(p)) ? plain : [pattern];
+  }
+
+  function whitelisted(view, domain) {
+    const domains = setting(view, "whitelist", "domains").value || [];
+    if (domains.some((d) => domain === d || domain.endsWith("." + d))) return true;
+    return (setting(view, "whitelist", "builtin").value || []).some((p) => {
+      try { return new RegExp(p, "i").test(`${domain}:443`); } catch (_) { return false; }
+    });
   }
 
   function renderWhitelist(view) {
     const domains = setting(view, "whitelist", "domains").value || [];
+    const builtin = (setting(view, "whitelist", "builtin").value || []).flatMap(readable);
     const referer = setting(view, "whitelist", "match_referer").value;
     const editable = view.editable;
     $("wl-list").replaceChildren(...domains.map((d) => h("li", {},
       d, h("button", { type: "button", title: `Remove ${d}`, "aria-label": `Remove ${d}`, text: "×",
                        disabled: !editable, onclick: () => updateDomains(domains.filter((x) => x !== d), `${d} removed`) }))));
     $("wl-empty").hidden = domains.length > 0;
+    $("wl-builtin-list").replaceChildren(...builtin.map((d) => h("li", { text: d })));
+    $("wl-builtin-count").textContent = `(${builtin.length})`;
     $("wl-referer").checked = !!referer;
     $("wl-referer").disabled = !editable;
     for (const el of $("wl-form").elements) el.disabled = !editable;
@@ -298,8 +319,8 @@
     e.preventDefault();
     const domain = normalizeDomain($("wl-input").value);
     if (!domain) return;
+    if (whitelisted(cfgView, domain)) { $("wl-error").textContent = `${domain} is already whitelisted.`; return; }
     const domains = setting(cfgView, "whitelist", "domains").value || [];
-    if (domains.includes(domain)) { $("wl-error").textContent = `${domain} is already whitelisted.`; return; }
     await updateDomains([...domains, domain], `${domain} whitelisted`);
     if (!$("wl-error").textContent) $("wl-input").value = "";
   });
@@ -312,70 +333,6 @@
       e.target.checked = !e.target.checked;
       if (err.status !== 401) $("wl-error").textContent = err.message;
     }
-  });
-
-  // ---- never intercepted (proxy.passthrough_hosts) ----------------------
-
-  // Patterns are regexes on host:port. Domains added here are written as
-  // "(^|\.)example\.com:", which covers subdomains.
-  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const domainPattern = (d) => `(^|\\.)${escapeRegex(d)}:`;
-
-  // A pattern as the domains it covers, for display: one alternation group
-  // is expanded ("login\.(live|microsoftonline)\.com:" is two domains).
-  // Anything else regex-like is shown as written.
-  function readable(pattern) {
-    const s = pattern.replace(/^\(\^\|\\\.\)/, "").replace(/^\^/, "").replace(/:$/, "");
-    const m = s.match(/^([^()|]*)\(([^()]*)\)([^()|]*)$/);
-    const parts = m ? m[2].split("|").map((a) => m[1] + a + m[3]) : [s];
-    const plain = parts.map((p) => p.replace(/\\\./g, "."));
-    return plain.every((p) => /^[a-z0-9.-]+$/i.test(p)) ? plain : [pattern];
-  }
-
-  function passedThrough(view, domain) {
-    const all = [...(setting(view, "proxy", "passthrough_hosts").value || []),
-                 ...(setting(view, "proxy", "extra_passthrough_hosts").value || [])];
-    return all.some((p) => { try { return new RegExp(p, "i").test(`${domain}:443`); } catch (_) { return false; } });
-  }
-
-  function renderPassthrough(view) {
-    const builtin = (setting(view, "proxy", "passthrough_hosts").value || []).flatMap(readable);
-    const extra = setting(view, "proxy", "extra_passthrough_hosts").value || [];
-    const editable = view.editable;
-    $("pt-builtin-list").replaceChildren(...builtin.map((d) => h("li", { text: d })));
-    $("pt-builtin-count").textContent = `(${builtin.length})`;
-    $("pt-list").replaceChildren(...extra.map((p) => {
-      const label = readable(p).join(", ");
-      return h("li", {}, label, h("button", {
-        type: "button", title: `Remove ${label}`, "aria-label": `Remove ${label}`, text: "×",
-        disabled: !editable, onclick: () => updatePassthrough(extra.filter((x) => x !== p), `${label} removed`) }));
-    }));
-    $("pt-empty").hidden = extra.length > 0;
-    for (const el of $("pt-form").elements) el.disabled = !editable;
-    if (!editable) $("pt-error").textContent = view.path
-      ? `${view.path} isn't writable, so this list can't be changed here.`
-      : "No config file is set (CENSOR_CONFIG), so this list can't be changed here.";
-  }
-
-  async function updatePassthrough(patterns, message) {
-    $("pt-error").textContent = "";
-    try {
-      renderPassthrough(await saveSettings({ "proxy.extra_passthrough_hosts": patterns }));
-      toast(message);
-    } catch (err) {
-      if (err.status !== 401) $("pt-error").textContent = err.message;
-    }
-  }
-
-  $("pt-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const domain = normalizeDomain($("pt-input").value);
-    if (!domain) return;
-    if (!/^[a-z0-9.-]+$/.test(domain)) { $("pt-error").textContent = `${domain} isn't a domain.`; return; }
-    if (passedThrough(cfgView, domain)) { $("pt-error").textContent = `${domain} is already never intercepted.`; return; }
-    const extra = setting(cfgView, "proxy", "extra_passthrough_hosts").value || [];
-    await updatePassthrough([...extra, domainPattern(domain)], `${domain} won't be intercepted`);
-    if (!$("pt-error").textContent) $("pt-input").value = "";
   });
 
   // ---- detections -------------------------------------------------------

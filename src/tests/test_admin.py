@@ -15,9 +15,9 @@ USER_CONFIG = """\
 censor:
   style: gaussian          # gaussian | pixelate | solid
 
-proxy:
+whitelist:
   # Pinned clients.
-  passthrough_hosts:
+  builtin:
     - '^update\\.googleapis\\.com:'
 """
 

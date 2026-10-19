@@ -7,20 +7,13 @@ censor:
 logging:
   level: debug             # off | info (hostnames) | debug (full URLs); debug while testing
 
-proxy:
-  # Extra hosts that bypass TLS interception (regexes on host:port), added to
-  # the defaults (Chromium updaters, sign-in, password managers, payments,
-  # common banks, .gov/.mil/.edu). Nothing from these hosts is censored.
-  # For example:
-  #   - '(^|\.)mychart\.example\.org:'
-  extra_passthrough_hosts: []
-
 video:
   # Temporarily on while debugging video pages; logs page URLs.
   debug: true
 
 whitelist:
-  # Passed through unscanned, with their subdomains. Managed from the admin
-  # panel's Whitelist tab.
+  # Not intercepted at all, with their subdomains; added to the built-in
+  # list (Chromium updaters, sign-in, password managers, payments, common
+  # banks, .gov/.mil/.edu). Managed from the admin panel's Whitelist tab.
   domains:
     - youtube.com

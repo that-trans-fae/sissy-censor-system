@@ -1,8 +1,8 @@
 """mitmproxy addon: censor female explicit regions in image responses
 (including ones whose Content-Type doesn't say image) and in base64 data-URI
 images embedded in text bodies, and inject the video control and image
-placeholders into pages on allowlisted hosts. Whitelisted domains pass
-untouched; the admin panel (censor_proxy/admin.py) can change the config
+placeholders into pages on allowlisted hosts. Whitelisted hosts aren't
+intercepted, and what their pages load passes untouched; the admin panel (censor_proxy/admin.py) can change the config
 while the proxy runs.
 
 Run with:  mitmdump -s censor.py
@@ -62,8 +62,8 @@ class CensorAddon:
         # Lazy upstream connections, so CONNECT to the internal host doesn't
         # fail trying to reach a real censor.local.
         ctx.options.update(connection_strategy="lazy")
-        if self.cfg.proxy.ignore_hosts:
-            ctx.options.update(ignore_hosts=list(self.cfg.proxy.ignore_hosts))
+        if self.cfg.whitelist.patterns:
+            ctx.options.update(ignore_hosts=list(self.cfg.whitelist.patterns))
         if self.cfg.admin.enabled:
             self.admin = AdminServer(self.cfg, self, UserConfigFile(config_path()))
             self.admin.start()
@@ -132,8 +132,8 @@ class CensorAddon:
             self.video_hosts = [re.compile(p) for p in cfg.video.hosts]
             self.jobs.reconfigure(cfg)
             self.server.reconfigure(cfg)
-            if cfg.proxy.ignore_hosts != old.proxy.ignore_hosts:
-                ctx.options.update(ignore_hosts=list(cfg.proxy.ignore_hosts))
+            if cfg.whitelist.patterns != old.whitelist.patterns:
+                ctx.options.update(ignore_hosts=list(cfg.whitelist.patterns))
         asyncio.run_coroutine_threadsafe(switch(), self.loop).result(timeout=30)
         log.info("config applied: model=%s style=%s whitelist=%s", cfg.model.path or "320n (bundled)",
                  cfg.censor.style, ", ".join(cfg.whitelist.domains) or "none")
@@ -141,9 +141,9 @@ class CensorAddon:
     def _whitelisted(self, flow: http.HTTPFlow) -> str | None:
         """The whitelisted domain covering this request or the page that made it."""
         wl = self.cfg.whitelist
-        if not wl.domains:
+        if not wl.patterns:
             return None
-        if domain := wl.match(flow.request.pretty_host):
+        if domain := wl.match(flow.request.pretty_host, flow.request.port):
             return domain
         if wl.match_referer:
             for header in ("Referer", "Origin"):

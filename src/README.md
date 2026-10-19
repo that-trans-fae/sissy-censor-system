@@ -67,8 +67,8 @@ chromium --user-data-dir=$HOME/snap/chromium/common/censor-test --proxy-server=1
 ```
 
 Chromium's component updater ignores the policy, so `update.googleapis.com`
-and `optimizationguide-pa.googleapis.com` are in the default passthrough list
-(`proxy.passthrough_hosts`).
+and `optimizationguide-pa.googleapis.com` are on the built-in
+[whitelist](#whitelist) (`whitelist.builtin`).
 
 ### Firefox (snap)
 
@@ -82,16 +82,20 @@ keys you change; every option and its default is documented in
 [`censor_proxy/defaults.yaml`](censor_proxy/defaults.yaml). Unknown keys are
 rejected at startup.
 
-### Passthrough hosts
+### Whitelist
 
-Hosts matching `proxy.passthrough_hosts` bypass TLS interception, so nothing
-they serve is censored. The defaults cover Chromium's updaters, sign-in
-providers, password managers, payment processors, common US banks and
+Whitelisted hosts bypass TLS interception entirely, so the proxy never sees
+their logins and nothing they serve is censored. The built-in list
+(`whitelist.builtin`, regexes on `host:port`) covers Chromium's updaters,
+sign-in providers, password managers, payment processors, common US banks and
 brokerages, and every `.gov`, `.mil` and `.edu` site. Add your own (your bank,
-health portal, employer or university sign-in) with
-`proxy.extra_passthrough_hosts`, which is appended to the defaults; setting
-`passthrough_hosts` itself replaces them. Only add hosts that never serve
-images you'd want censored.
+health portal, employer or university sign-in, `youtube.com`) as plain domains
+in `whitelist.domains`, from the panel's Whitelist tab; they cover their
+subdomains and are added to the built-in list, while setting `builtin` itself
+replaces it. By default what a whitelisted page loads from other hosts passes
+unscanned too (matched by `Referer`/`Origin`), so YouTube's thumbnails from
+`i.ytimg.com` pass; `whitelist.match_referer: false` turns that off. Only add
+hosts that never serve images you'd want censored.
 
 The detection log is `logs/detections.jsonl`. At `logging.level: info` it
 records hostnames; `debug` adds full URLs, every image scanned, and every
@@ -141,14 +145,9 @@ Tabs:
 
 - **Overview**: counts since start (censored, clean, whitelisted, failed
   closed...), the model and the log level.
-- **Whitelist**: domains that pass through unscanned and unmodified,
-  subdomains included. Pages from them also get no video control. By default
-  what a whitelisted page loads passes too (matched by `Referer`), so
-  YouTube's thumbnails from `i.ytimg.com` aren't scanned. Turn that off with
-  the checkbox (`whitelist.match_referer`). `youtube.com` is in the example
-  config. Below it, **Never intercepted** lists the
-  [passthrough hosts](#passthrough-hosts): the built-in ones (read-only) and
-  yours (`proxy.extra_passthrough_hosts`), which you add as plain domains.
+- **Whitelist**: the [whitelist](#whitelist). Add or remove your domains;
+  the built-in list is shown read-only below them. The checkbox is
+  `whitelist.match_referer`. `youtube.com` is in the example config.
 - **Detections**: the latest entries of the detection log, filterable. No
   images, just hosts, labels and scores.
 - **Video**: video jobs with their progress, and a button to cancel them.

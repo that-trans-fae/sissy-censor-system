@@ -291,14 +291,29 @@ video:
   debug: false
 
 proxy:
-  # Regexes matched against host:port. Matching hosts bypass TLS
-  # interception entirely (mitmproxy ignore_hosts), so nothing they serve is
-  # censored. Only list hosts that break under interception, carry
-  # credentials or money, or otherwise don't serve explicit content: not
-  # google.com or gstatic.com (Image Search thumbnails), CDNs, social or chat
-  # sites. Add your own hosts with extra_passthrough_hosts rather than
-  # overriding this list, which replaces it.
-  passthrough_hosts:
+  # Hostname the proxy answers on itself (/health, /inject.js, /video/...).
+  # Requests to it are routed to an internal server on internal_port.
+  health_host: censor.local
+  # Hostname the admin panel answers on through the proxy
+  # (https://scs.local/admin). Requests to it go to the admin listener.
+  admin_host: scs.local
+  internal_port: 8081
+
+whitelist:
+  # Whitelisted hosts aren't intercepted at all (mitmproxy ignore_hosts):
+  # the proxy never decrypts their connections, so it never sees their
+  # logins or account pages, and nothing from them is censored. Only list
+  # hosts that break under interception, carry credentials or money, or
+  # otherwise don't serve explicit content: not google.com or gstatic.com
+  # (Image Search thumbnails), CDNs, social or chat sites.
+  #
+  # Your domains, each covering its subdomains (youtube.com also covers
+  # www.youtube.com; a leading www. is dropped). Added to the built-in
+  # list. Edited from the admin panel's Whitelist tab.
+  domains: []
+  # The built-in list: regexes matched against host:port. Add your own
+  # hosts with domains rather than overriding this, which replaces it.
+  builtin:
     # Chromium background services that ignore the CACertificates policy,
     # and the binary downloads update.googleapis.com redirects to.
     - '^update\.googleapis\.com:'
@@ -327,27 +342,11 @@ proxy:
     - '\.(gov|mil|edu):'
     # Identity verification used by government sign-ins.
     - '(^|\.)id\.me:'
-  # Appended to passthrough_hosts: your bank, health portal, employer or
-  # university sign-in, without repeating the defaults.
-  extra_passthrough_hosts: []
-  # Hostname the proxy answers on itself (/health, /inject.js, /video/...).
-  # Requests to it are routed to an internal server on internal_port.
-  health_host: censor.local
-  # Hostname the admin panel answers on through the proxy
-  # (https://scs.local/admin). Requests to it go to the admin listener.
-  admin_host: scs.local
-  internal_port: 8081
-
-whitelist:
-  # Domains whose content passes through unscanned and unmodified: no image
-  # or data-URI censoring and no video control. An entry covers the domain
-  # and its subdomains (youtube.com also covers www.youtube.com; a leading
-  # www. is dropped). Edited from the admin panel's Whitelist tab.
-  domains: []
   # Also pass requests made by a whitelisted page (matched by Referer or
-  # Origin), so images a site loads from its own CDN pass too: youtube.com
-  # loads thumbnails from i.ytimg.com. That includes any third-party images
-  # or ads the page embeds. false: only the request's own host counts.
+  # Origin), unscanned, so images a site loads from its own CDN pass too:
+  # youtube.com loads thumbnails from i.ytimg.com. That includes any
+  # third-party images or ads the page embeds. false: only the request's
+  # own host counts.
   match_referer: true
 
 admin:
