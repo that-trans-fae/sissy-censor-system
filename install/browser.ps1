@@ -391,6 +391,13 @@ function Trust-CaInProfile($chromium) {
         Remove-Item -Force -ErrorAction SilentlyContinue "$log.out", "$log.err"
     }
     if (-not (Test-Path $db)) { Die "Chromium $(Chromium-Version $chromium) at $chromium did not create $db ($ChromiumMinVersion or newer is needed)" }
+    # A running browser holds the store locked. An earlier run has usually
+    # trusted the CA already, so that is a warning, not a stop: the steps
+    # after this one (the update task) still run.
+    if (Test-ProfileInUse) {
+        Warn "$BrowserName is running, so the proxy CA was not written again; close it and rerun if pages show certificate warnings"
+        return
+    }
     Log "Trusting the proxy CA in the $BrowserName profile"
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CaPem)
     $der = $cert.RawData
