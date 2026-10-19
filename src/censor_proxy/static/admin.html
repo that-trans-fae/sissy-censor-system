@@ -150,6 +150,15 @@
       <p class="error" id="upd-error" role="alert"></p>
     </div>
     <div class="card">
+      <h2>Video</h2>
+      <label class="check">
+        <input type="checkbox" id="vid-muted">
+        <span>Start censored videos muted. The video's controls unmute it. Off, the censored
+          copy takes the muted state of the page's own video.</span>
+      </label>
+      <p class="error" id="vid-error" role="alert"></p>
+    </div>
+    <div class="card">
       <h2>Image model</h2>
       <div class="levels" id="speeds" role="radiogroup" aria-label="Image model"></div>
     </div>
@@ -161,15 +170,6 @@
     <div class="card">
       <h2>Censoring level</h2>
       <div class="levels" id="levels" role="radiogroup" aria-label="Censoring level"></div>
-    </div>
-    <div class="card">
-      <h2>Video</h2>
-      <label class="check">
-        <input type="checkbox" id="vid-muted">
-        <span>Start censored videos muted. The video's controls unmute it. Off, the censored
-          copy takes the muted state of the page's own video.</span>
-      </label>
-      <p class="error" id="vid-error" role="alert"></p>
     </div>
     <div id="cfg-sections"></div>
     <div class="card" id="cfg-file" hidden>
