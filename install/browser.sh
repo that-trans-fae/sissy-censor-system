@@ -15,9 +15,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 #
 # Remove the launcher, its profile and the update job (keeps Docker,
-# Chromium and ~/scs):
+# Chromium and ~/scs): --uninstall, or SCS_UNINSTALL=1 in the environment:
 #
-#   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
+#   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
 #
 # Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, and SCS_GPU=0
 # to leave the GPU out of the container.
@@ -30,6 +30,12 @@ SCS_CHANNEL="${SCS_CHANNEL:-$SCS_IMAGE_REPO:latest}"
 SCS_DIR="${SCS_DIR:-$HOME/scs}"
 SCS_UNINSTALL="${SCS_UNINSTALL:-0}"
 SCS_GPU="${SCS_GPU:-1}"
+for arg in "$@"; do
+  case $arg in
+    --uninstall) SCS_UNINSTALL=1 ;;
+    *) echo "unknown option: $arg (the only option is --uninstall)" >&2; exit 2 ;;
+  esac
+done
 
 BROWSER_NAME="Sissy Browser"
 BROWSER_ID=sissy-browser

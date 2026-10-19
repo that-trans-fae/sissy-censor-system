@@ -22,13 +22,15 @@ session, it keeps to a child scope and stops with throw, never exit, which
 would close the window.
 
 Remove the shortcut, its profile and the update task (keeps Docker Desktop,
-Chromium and %USERPROFILE%\scs):
+Chromium and %USERPROFILE%\scs): the -Uninstall switch (or SCS_UNINSTALL=1
+in the environment, which "irm | iex" can't pass a switch to):
 
-  $env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1))) -Uninstall
 
 Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE,
 and SCS_GPU=0 to leave the GPU out of the container.
 #>
+param([switch]$Uninstall)
 & {
 $ErrorActionPreference = 'Stop'
 
@@ -37,7 +39,7 @@ $ScsImageRepo = if ($env:SCS_IMAGE_REPO) { $env:SCS_IMAGE_REPO } else { 'thattra
 # The tag installs follow; scs-update.ps1 moves to whatever it points at.
 $ScsChannel   = if ($env:SCS_CHANNEL) { $env:SCS_CHANNEL } else { "$ScsImageRepo`:latest" }
 $ScsDir       = if ($env:SCS_DIR) { $env:SCS_DIR } else { Join-Path $env:USERPROFILE 'scs' }
-$Uninstall    = $env:SCS_UNINSTALL -eq '1'
+$Uninstall    = $Uninstall -or $env:SCS_UNINSTALL -eq '1'
 
 $BrowserName = 'Sissy Browser'
 $ProxyHost = '127.0.0.1'

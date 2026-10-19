@@ -177,11 +177,11 @@ To remove the browser, its profile and the update job (Docker, Chromium and
 the `~/scs` folder are kept):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
+curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
 ```
 
 ```powershell
-$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1))) -Uninstall
 ```
 
 [`install/README.md`](install/README.md) covers the environment variables

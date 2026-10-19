@@ -125,17 +125,17 @@ Both scripts read these environment variables:
 | `SCS_IMAGE_REPO` | `thattransfae/scs` | Docker Hub repository |
 | `SCS_CHANNEL` | `$SCS_IMAGE_REPO:latest` | Tag to install and follow |
 | `SCS_DIR` | `~/scs` (`%USERPROFILE%\scs`) | Where the proxy runs from |
-| `SCS_UNINSTALL` | unset | `1` removes the launcher, its profile and the update job |
+| `SCS_UNINSTALL` | unset | `1` removes the launcher, its profile and the update job (same as `--uninstall` / `-Uninstall`) |
 | `SCS_GPU` | `1` | `0` leaves the GPU out of the container (see below) |
 
 Undo keeps Docker, Chromium and `~/scs`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
+curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
 ```
 
 ```powershell
-$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1))) -Uninstall
 ```
 
 On Linux and Windows the installer looks for a GPU to decode and encode
