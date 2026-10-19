@@ -21,6 +21,10 @@ src/censor.py                  mitmproxy addon (entry point, mitmdump -s)
 src/censor_proxy/imaging.py    Censor.censor_bytes(): decode, detect, blur, re-encode
 src/censor_proxy/detection.py  NudeNet wrapper (with tiling) and decide(), the selection rule
 src/censor_proxy/datauri.py    base64 data-URI images in HTML/CSS/JSON bodies
+src/censor_proxy/video.py      video jobs: ffmpeg decode -> detect -> blur -> fMP4
+src/censor_proxy/server.py     internal HTTP server behind https://censor.local
+src/censor_proxy/inject.py     HTML script injection and CSP extension
+src/censor_proxy/static/inject.js  the injected video control (branding at the top)
 src/censor_proxy/config.py     dataclasses + loader (defaults.yaml merged with user file)
 src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
@@ -73,6 +77,21 @@ stdin, or put them under `src/` and delete them afterwards.
   `/app/models/640m.onnx` and is more accurate; switch with `model.path` and
   `model.resolution`.
 
+## How video works
+
+On pages whose host matches `video.hosts` (every site by default), the
+addon injects
+`https://censor.local/inject.js` at the top of `<head>` and extends the CSP
+to allow it. The script covers and pauses every `<video>` (patching
+`play()` and `attachShadow`, so shadow-DOM players are caught too) and, on
+click, posts the source URL to `/video/jobs`. Only full documents and
+iframes are injected (`Sec-Fetch-Dest`), never fetched HTML fragments. The addon routes
+`censor.local` to the internal server on `proxy.internal_port`; jobs run
+ffmpeg in `video.py` and stream fragmented MP4 back while they run. Job
+requests are only accepted from origins matching `video.hosts`, and only
+for public addresses (`video.allow_private_sources` relaxes that). See
+`docs/video-design.md`.
+
 ## Working conventions
 
 - **Config over constants.** Any behaviour choice gets a config key with the
@@ -103,8 +122,10 @@ stdin, or put them under `src/` and delete them afterwards.
   converted just for detection.
 - `NudeDetector` ignores its `providers` argument and has no session options,
   so `Detector` replaces its ONNX session to set thread counts.
-- The addon's `responseheaders` hook runs after mitmproxy's StreamBodies
-  addon and turns streaming back off for images it will scan.
+- Never set mitmproxy's `stream_large_bodies`: it is applied after the
+  addon's `responseheaders` hook and silently streams large images past the
+  censor. The addon decides streaming itself (buffer what it inspects,
+  stream everything else); `tests/test_proxy.py` guards this.
 - Chromium (snap) only trusts the proxy CA through the `CACertificates`
   policy; the NSS database route registers it as an intermediate. Its
   updater hosts are in the passthrough list because they ignore the policy.

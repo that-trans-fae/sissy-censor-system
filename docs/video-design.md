@@ -2,9 +2,11 @@
 
 Status: approved Oct 18, 2026; being built. Plain files (MP4/WebM) and
 streaming (HLS/DASH) are both in scope; videos start paused and covered
-until "play censored" is clicked; the control is injected only on
-allowlisted sites. Every video on those sites gets the control, including
-ones the proxy can't censor (see "Videos we can't censor").
+until "play censored" is clicked. The control is injected on every site
+(changed from an allowlist on Oct 18, 2026, because much of the content is
+embedded from other hosts); `video.hosts` can still narrow it. Every video
+gets the control, including ones the proxy can't censor (see "Videos we
+can't censor").
 
 ## Approach: replace the player with a censored stream
 
@@ -32,7 +34,9 @@ proxy
 
 ## Pieces
 
-1. **HTML injection** on allowlisted hosts (config `video.hosts`): add
+1. **HTML injection** on every site by default (config `video.hosts`), into
+   full documents and iframes only (`Sec-Fetch-Dest`), never into HTML
+   fragments a page fetches itself: add
    `<script src="https://censor.local/inject.js">` at the top of `<head>`.
    Content-Security-Policy is extended, not removed: `https://censor.local`
    is added to `script-src`, `media-src` and `connect-src` where those
@@ -69,7 +73,7 @@ proxy
 
 ## Videos we can't censor
 
-Any video on an allowlisted page still gets the injected control, even when
+Any video still gets the injected control, even when
 the script can't find a usable source (DRM, an unknown player, a source the
 proxy can't fetch). It stays covered and paused, and the control says the
 video can't be censored instead of offering "play censored". Nothing plays
@@ -91,11 +95,13 @@ branded later: CSS custom properties and text strings at the top of
 - **Cookies**: the proxy fetches the source itself, so videos that need the
   site's login cookies may fail. Reddit's are public. The script can pass
   along non-HttpOnly cookies if needed.
-- **Not covered**: DRM-protected video (Widevine), and any site not on the
-  allowlist.
+- **Not covered**: DRM-protected video (Widevine).
+- **Security**: with every site in scope, every page's Content-Security-
+  Policy is extended to allow our script, and any page can ask the proxy to
+  fetch a public video URL. Private and loopback addresses stay refused.
+  The user will be warned about this trade-off (not built yet).
 
 ## Defaults chosen
 
 Approved without changes to these, so the proposed defaults stand (all
-configurable): Reddit is the first allowlisted site, output is capped at
-720p, and the original audio is kept.
+configurable): output is capped at 720p and the original audio is kept.

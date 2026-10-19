@@ -90,14 +90,18 @@ images:
   # min_side_px, pass through unscanned.
   size_floor_bytes: 4096
   min_side_px: 64
-  # Image responses larger than this are streamed through unscanned.
-  max_bytes: 67108864
+  # Larger images, or ones that would take more than max_decoded_bytes of
+  # memory to decode (width x height x 4 x frames), aren't scanned: they are
+  # delivered as their first frame, fully censored. Nothing streams through
+  # unscanned.
+  max_bytes: 268435456
+  max_decoded_bytes: 2147483648
   # Animated images: run detection on every Nth frame; skipped frames get the
   # union of the boxes from the sampled frames either side. Long animations
   # use a larger step so no more than max_detect_frames are scanned.
   frame_step: 2
   max_detect_frames: 48
-  # Animations with more frames than this are fail-closed rather than scanned.
+  # Animations with more frames than this get the same first-frame treatment.
   max_frames: 600
 
 data_uris:
@@ -112,12 +116,57 @@ data_uris:
   # Larger text bodies are streamed through unscanned.
   max_body_bytes: 10485760
 
+video:
+  # Inject a control on pages from `hosts` that covers every <video> and
+  # offers a censored copy, produced by the proxy with ffmpeg.
+  enabled: true
+  # Regexes matched against the page's hostname. Every site by default.
+  # Injecting means extending each page's Content-Security-Policy to allow
+  # our script, so narrow this to limit that.
+  hosts:
+    - '.*'
+  # Model for video frames. null uses the bundled 320n; 640m is far too slow
+  # for video (~10 s of work per second of video).
+  model_path: null
+  model_resolution: 320
+  tiling: false
+  # Frames per second that go through detection; boxes are held across the
+  # frames in between.
+  sample_fps: 4
+  # Output is scaled down to at most this height and frame rate.
+  max_height: 720
+  max_fps: 30
+  # Extra padding on video boxes (fraction of box size) to cover motion
+  # between samples. Used instead of censor.padding.
+  padding: 0.25
+  # Keep the original audio (re-encoded to AAC). false outputs silent video.
+  audio: true
+  # x264 settings for the censored copy.
+  preset: veryfast
+  crf: 23
+  # Seconds of censored video to have ready before playback starts.
+  ready_seconds: 3
+  # Longer videos are refused (they stay covered).
+  max_duration_seconds: 1800
+  max_concurrent_jobs: 1
+  # Allow sources on loopback or private networks. Off so pages can't use
+  # the proxy to reach the local network; turn on for a LAN media server.
+  allow_private_sources: false
+  # Censored outputs, reused when the same video is played again. Oldest
+  # are deleted beyond cache_max_bytes.
+  cache_dir: /tmp/censor-video
+  cache_max_bytes: 2147483648
+  # Name shown on the injected control; its look is set in static/inject.js.
+  brand_name: Censor
+
 proxy:
   # Regexes matched against host:port. Matching hosts bypass TLS
   # interception entirely (mitmproxy ignore_hosts).
   passthrough_hosts: []
-  # Hostname the addon answers on for GET /health.
+  # Hostname the proxy answers on itself (/health, /inject.js, /video/...).
+  # Requests to it are routed to an internal server on internal_port.
   health_host: censor.local
+  internal_port: 8081
 
 cache:
   # Content-hash cache of scan results. 0 disables it.

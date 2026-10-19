@@ -7,6 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ffmpeg decodes and re-encodes video (plain files, HLS and DASH).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
@@ -34,5 +39,8 @@ COPY censor.py .
 EXPOSE 8080
 ENV CENSOR_CONFIG=/config/config.yaml
 
+# No stream_large_bodies: mitmproxy applies it after the addon's
+# responseheaders hook, which would stream large images past the censor. The
+# addon streams every body it doesn't need to inspect instead.
 CMD ["mitmdump", "-s", "/app/censor.py", "--listen-port", "8080", \
-     "--set", "confdir=/root/.mitmproxy", "--set", "stream_large_bodies=5m"]
+     "--set", "confdir=/root/.mitmproxy"]

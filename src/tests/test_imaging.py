@@ -136,3 +136,16 @@ def test_cache_hit(make_config):
     original = encode(noise(), "PNG")
     first, second = censor.censor_bytes(original), censor.censor_bytes(original)
     assert fake.calls == 1 and second.cached and second.data == first.data
+
+
+@pytest.mark.parametrize("limit", ["max_bytes: 1000", "max_decoded_bytes: 1000", "max_frames: 3"])
+def test_oversized_animation_fails_closed_to_first_frame(make_config, limit):
+    cfg = make_config(f"images: {{size_floor_bytes: 0, min_side_px: 1, {limit}}}\n")
+    frames = [noise(seed=i) for i in range(5)]
+    original = encode(frames[0], "GIF", save_all=True, append_images=frames[1:], duration=50, loop=0)
+    fake = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=BOX)])
+    result = Censor(cfg, fake).censor_bytes(original)
+    assert result.action == "fail_closed" and fake.calls == 0
+    out = Image.open(io.BytesIO(result.data))
+    assert out.format == "GIF" and getattr(out, "n_frames", 1) == 1
+    assert (np.abs(decode(original) - decode(result.data)).sum(axis=2) > 0).mean() > 0.9

@@ -84,16 +84,18 @@ class Censor:
         result.elapsed_ms = (time.perf_counter() - start) * 1000
         return result
 
-    def fail_closed(self, data: bytes, reason: str) -> ScanResult:
-        """Censor the whole image (every frame). Used when detection fails."""
+    def fail_closed(self, data: bytes, reason: str, first_frame_only: bool = False) -> ScanResult:
+        """Censor the whole image (every frame). Used when detection fails.
+        With first_frame_only, an animation becomes its first frame, fully
+        censored; for images too big to decode in full."""
         start = time.perf_counter()
         try:
-            decoded = _decode(data)
+            decoded = _decode(data, first_frame_only)
         except Exception as e:  # undecodable: nothing we can blur
             return ScanResult(data, "error", f"{reason}; undecodable, delivered unmodified: {e}")
         for frame in decoded.frames:
             h, w = frame.shape[:2]
-            _apply(frame, Box(0, 0, w, h), self.cfg.censor)
+            apply_censor(frame, Box(0, 0, w, h), self.cfg.censor)
         out = _encode(decoded, self.cfg.censor)
         return ScanResult(out, "fail_closed", reason, decoded.format, len(decoded.frames),
                           elapsed_ms=(time.perf_counter() - start) * 1000)
@@ -114,8 +116,16 @@ class Censor:
             return ScanResult(data, "skipped", f"unsupported format {fmt}", fmt)
         if min(size) < icfg.min_side_px:
             return ScanResult(data, "skipped", "below min_side_px", fmt)
+        # Too big to scan: deliver the first frame fully censored, without
+        # decoding the rest.
+        decoded_bytes = size[0] * size[1] * 4 * n_frames
+        if len(data) > icfg.max_bytes:
+            return self.fail_closed(data, f"{len(data)} bytes exceeds max_bytes", first_frame_only=True)
+        if decoded_bytes > icfg.max_decoded_bytes:
+            return self.fail_closed(data, f"{decoded_bytes} decoded bytes exceeds max_decoded_bytes",
+                                    first_frame_only=True)
         if n_frames > icfg.max_frames:
-            return self.fail_closed(data, f"{n_frames} frames exceeds max_frames")
+            return self.fail_closed(data, f"{n_frames} frames exceeds max_frames", first_frame_only=True)
 
         key = hashlib.sha256(data).hexdigest()
         if (hit := self._cache_get(key)) is not None:
@@ -131,7 +141,7 @@ class Censor:
             for frame, boxes in zip(decoded.frames, boxes_per_frame):
                 h, w = frame.shape[:2]
                 for box in boxes:
-                    _apply(frame, box.padded(self.cfg.censor.padding, w, h), self.cfg.censor)
+                    apply_censor(frame, box.padded(self.cfg.censor.padding, w, h), self.cfg.censor)
             result = ScanResult(_encode(decoded, self.cfg.censor), "censored", "", fmt,
                                 len(decoded.frames), frame_decisions)
         self._cache_put(key, result)
@@ -189,13 +199,13 @@ def _boxes_per_frame(n: int, frame_decisions: list[tuple[int, list[Decision]]]) 
     return out
 
 
-def _decode(data: bytes) -> _Decoded:
+def _decode(data: bytes, first_frame_only: bool = False) -> _Decoded:
     im = Image.open(io.BytesIO(data))
     fmt = im.format
     info = {"icc_profile": im.info.get("icc_profile")}
     if fmt == "WEBP":
         info["lossless"] = b"VP8L" in data[:64]
-    n_frames = getattr(im, "n_frames", 1)
+    n_frames = 1 if first_frame_only else getattr(im, "n_frames", 1)
 
     if n_frames == 1:
         oriented = ImageOps.exif_transpose(im)
@@ -243,7 +253,7 @@ def _encode(d: _Decoded, cfg: CensorConfig) -> bytes:
     return buf.getvalue()
 
 
-def _apply(frame: np.ndarray, box: Box, cfg: CensorConfig) -> None:
+def apply_censor(frame: np.ndarray, box: Box, cfg: CensorConfig) -> None:
     """Censor `box` of an RGB(A) frame in place. Alpha is left alone."""
     if box.w <= 0 or box.h <= 0:
         return

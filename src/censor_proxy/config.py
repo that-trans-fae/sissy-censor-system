@@ -66,6 +66,7 @@ class ImagesConfig:
     size_floor_bytes: int
     min_side_px: int
     max_bytes: int
+    max_decoded_bytes: int
     frame_step: int
     max_detect_frames: int
     max_frames: int
@@ -79,9 +80,33 @@ class DataUrisConfig:
 
 
 @dataclass(frozen=True)
+class VideoConfig:
+    enabled: bool
+    hosts: tuple[str, ...]
+    model_path: str | None
+    model_resolution: int
+    tiling: bool
+    sample_fps: float
+    max_height: int
+    max_fps: float
+    padding: float
+    audio: bool
+    preset: str
+    crf: int
+    ready_seconds: float
+    max_duration_seconds: float
+    max_concurrent_jobs: int
+    allow_private_sources: bool
+    cache_dir: str
+    cache_max_bytes: int
+    brand_name: str
+
+
+@dataclass(frozen=True)
 class ProxyConfig:
     passthrough_hosts: tuple[str, ...]
     health_host: str
+    internal_port: int
 
 
 @dataclass(frozen=True)
@@ -104,6 +129,7 @@ class Config:
     censor: CensorConfig
     images: ImagesConfig
     data_uris: DataUrisConfig
+    video: VideoConfig
     proxy: ProxyConfig
     cache: CacheConfig
     logging: LoggingConfig
@@ -151,9 +177,11 @@ def _build(raw: dict[str, Any]) -> Config:
             content_types=frozenset(t.lower() for t in raw["data_uris"]["content_types"] or ()),
             max_body_bytes=int(raw["data_uris"]["max_body_bytes"]),
         ),
+        "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ())}),
         "proxy": ProxyConfig(
             passthrough_hosts=tuple(raw["proxy"]["passthrough_hosts"] or ()),
             health_host=raw["proxy"]["health_host"],
+            internal_port=int(raw["proxy"]["internal_port"]),
         ),
         "cache": CacheConfig(**raw["cache"]),
         "logging": LoggingConfig(**raw["logging"]),
@@ -176,11 +204,15 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("censor.quality must be between 1 and 100")
     if len(cfg.censor.fill_color) != 3:
         raise ConfigError("censor.fill_color must be [R, G, B]")
-    for pattern in cfg.proxy.passthrough_hosts:
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise ConfigError(f"proxy.passthrough_hosts: bad regex {pattern!r}: {e}") from e
+    for key, patterns in (("proxy.passthrough_hosts", cfg.proxy.passthrough_hosts),
+                          ("video.hosts", cfg.video.hosts)):
+        for pattern in patterns:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                raise ConfigError(f"{key}: bad regex {pattern!r}: {e}") from e
+    if cfg.video.sample_fps <= 0:
+        raise ConfigError("video.sample_fps must be > 0")
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:

@@ -25,8 +25,9 @@ Last updated Oct 18, 2026.
 
 ## Not done yet
 
-- **Video**: plain files and HLS/DASH, paused and covered until "play
-  censored"; design approved in `video-design.md`, being built
+- **Video**: built and tested end to end with curl (injection, CSP, jobs,
+  live fMP4 streaming, Range), injected on every site; still to verify in
+  Chromium, and HLS/DASH against a real site
 - **System-wide proxy**: GNOME proxy setting with `src/proxy.pac`, and a check
   that browsing falls back to direct when the container is down. Chromium may
   not accept a `file://` PAC URL from system settings; if not, serve it over
@@ -34,6 +35,9 @@ Last updated Oct 18, 2026.
 - **Firefox (snap)**: CA trust and proxy settings
 - **Tuning from real browsing**: thresholds were tuned on 15 samples; review
   `src/logs/detections.jsonl` for misses and false positives
+
+- **Security warning**: tell the user that video injection extends every
+  page's CSP and lets pages ask the proxy to fetch public video URLs
 
 ## Later phases (from the handoff)
 
