@@ -16,7 +16,7 @@
 #
 # Uninstall: removes the launcher, its profile, the update job and the
 # proxy's container and image, asks before removing Docker and Chromium,
-# and keeps ~/scs (config, logs, CA). --uninstall, or SCS_UNINSTALL=1 in
+# and deletes ~/scs (config, logs, CA). --uninstall, or SCS_UNINSTALL=1 in
 # the environment:
 #
 #   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
@@ -676,7 +676,7 @@ channel_repo() {
 remove_proxy() {
   log "Removing the proxy container and image"
   if ! docker_installed || ! docker_ready; then
-    warn "Docker is not available; the proxy container and image were left. With Docker running: (cd $SCS_DIR && docker compose down) and docker image rm $(channel_repo)"
+    warn "Docker is not available; the proxy container and image were left. With Docker running: docker rm -f \$(docker ps -aq --filter label=com.docker.compose.project=scs); docker image rm -f \$(docker images -q $(channel_repo))"
     return
   fi
   if [ -f "$SCS_DIR/compose.yaml" ]; then
@@ -744,6 +744,17 @@ remove_chromium() {
   esac
 }
 
+# Only a folder that looks like ours: SCS_DIR can be pointed anywhere.
+remove_scs_dir() {
+  [ -d "$SCS_DIR" ] || return 0
+  if [ ! -f "$SCS_DIR/compose.yaml" ] && [ ! -f "$SCS_DIR/.env" ]; then
+    warn "$SCS_DIR has no compose.yaml or .env, so it was left alone"
+    return
+  fi
+  log "Removing $SCS_DIR"
+  rm -rf "$SCS_DIR" 2>/dev/null || sudo rm -rf "$SCS_DIR"
+}
+
 uninstall() {
   # The questions first, so nothing is started only to be removed.
   local remove_docker=0 remove_chromium=0 chromium
@@ -757,7 +768,8 @@ uninstall() {
   uninstall_updater
   if [ "$remove_docker" = 1 ]; then remove_docker; else remove_proxy; fi
   [ "$remove_chromium" = 0 ] || remove_chromium "$chromium"
-  log "Done. $SCS_DIR (the proxy's config, logs and CA) was left in place; delete it if you won't reinstall."
+  remove_scs_dir
+  log "Done"
 }
 
 # -------------------------------------------------------------------- main

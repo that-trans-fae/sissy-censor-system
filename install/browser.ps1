@@ -23,7 +23,7 @@ would close the window.
 
 Uninstall: removes the shortcut, its profile, the update task and the
 proxy's container and image, asks before removing Docker Desktop, Chromium
-and WSL, and keeps %USERPROFILE%\scs (config, logs, CA). The -Uninstall
+and WSL, and deletes %USERPROFILE%\scs (config, logs, CA). The -Uninstall
 switch, or SCS_UNINSTALL=1 in the environment, which "irm | iex" can't pass
 a switch to:
 
@@ -513,7 +513,7 @@ function Channel-Repo {
 function Remove-Proxy {
     Log 'Removing the proxy container and image'
     $repo = Channel-Repo
-    $left = "the proxy container and image were left. With Docker Desktop running: cd $ScsDir; docker compose down; docker image rm (docker images -q $repo)"
+    $left = "the proxy container and image were left. With Docker Desktop running: docker rm -f (docker ps -aq --filter label=com.docker.compose.project=scs); docker image rm -f (docker images -q $repo)"
     if (-not (Test-Path $DockerDesktopExe)) { Warn "Docker Desktop is not installed; $left"; return }
     Refresh-Path
     Quiet { docker info }
@@ -582,6 +582,18 @@ function Remove-Wsl {
     Start-Process -Wait -Verb RunAs powershell.exe -ArgumentList '-NoProfile', '-Command', $cmd
 }
 
+# Only a folder that looks like ours: SCS_DIR can be pointed anywhere.
+function Remove-ScsDir {
+    if (-not (Test-Path $ScsDir)) { return }
+    if (-not (Test-Path (Join-Path $ScsDir 'compose.yaml')) -and -not (Test-Path (Join-Path $ScsDir '.env'))) {
+        Warn "$ScsDir has no compose.yaml or .env, so it was left alone"
+        return
+    }
+    Log "Removing $ScsDir"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ScsDir
+    if (Test-Path $ScsDir) { Warn "$ScsDir could not be removed entirely (a file in it is open, or your shell is inside it); delete it by hand" }
+}
+
 function Uninstall {
     # The questions first, so nothing is started only to be removed.
     $removeDocker = (Test-Path $DockerDesktopExe) -and (Ask 'Remove Docker Desktop too, with every container and image in it?')
@@ -599,7 +611,8 @@ function Uninstall {
     if ($removeDocker) { Remove-DockerDesktop } else { Remove-Proxy }
     if ($removeChromium) { Remove-Chromium $chromium }
     if ($removeWsl) { Remove-Wsl }
-    Log "Done. $ScsDir (the proxy's config, logs and CA) was left in place; delete it if you won't reinstall."
+    Remove-ScsDir
+    Log 'Done'
     if ($removeWsl) { Write-Host '    Restart Windows to finish removing WSL.' }
 }
 

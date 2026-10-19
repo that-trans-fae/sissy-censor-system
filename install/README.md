@@ -130,8 +130,8 @@ Both scripts read these environment variables:
 
 Uninstalling removes the browser launcher, its profile, the update job and
 the proxy's container and image, then asks before removing Docker (with
-everything in it), Chromium and, on Windows, WSL. `~/scs` (config, logs and
-the CA) is kept; delete it by hand if you won't reinstall.
+everything in it), Chromium and, on Windows, WSL, and finally deletes
+`~/scs` (config, logs and the CA).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash -s -- --uninstall
