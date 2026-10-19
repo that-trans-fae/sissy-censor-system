@@ -24,7 +24,7 @@ from censor_proxy import datauri, inject
 from censor_proxy.admin import AdminServer, UserConfigFile
 from censor_proxy.config import Config, config_path, load_config
 from censor_proxy.detection_log import DetectionLog
-from censor_proxy.imaging import Censor, ScanResult, sniff
+from censor_proxy.imaging import Censor, ScanResult, is_animated, sniff
 from censor_proxy.server import InternalServer
 from censor_proxy.video import VideoJobs
 
@@ -37,6 +37,8 @@ class CensorAddon:
         self.censor: Censor | None = None
         self.detections: DetectionLog | None = None
         self.pool: ThreadPoolExecutor | None = None
+        # Animations may hold this many workers at once (images.still_workers)
+        self.animation_slots: asyncio.Semaphore | None = None
         self.jobs: VideoJobs | None = None
         self.server: InternalServer | None = None
         self.admin: AdminServer | None = None
@@ -55,6 +57,7 @@ class CensorAddon:
         self.detections = DetectionLog(self.cfg)
         self.pool = ThreadPoolExecutor(max_workers=self.cfg.model.workers,
                                        thread_name_prefix="censor")
+        self.animation_slots = _animation_slots(self.cfg)
         self.jobs = VideoJobs(self.cfg)
         self.server = InternalServer(self.cfg, self.jobs, self._health)
         self.server.start()
@@ -133,6 +136,9 @@ class CensorAddon:
             if pool:
                 self.pool, previous = pool, self.pool
                 previous.shutdown(wait=False)  # queued scans still finish
+            if (cfg.model.workers, cfg.images.still_workers) != \
+                    (old.model.workers, old.images.still_workers):
+                self.animation_slots = _animation_slots(cfg)
             self.cfg, self.censor = cfg, censor
             self.detections = DetectionLog(cfg)
             self.video_hosts = [re.compile(p) for p in cfg.video.hosts]
@@ -322,7 +328,13 @@ class CensorAddon:
             # Images that need no detection (small, cached) are settled off
             # the worker pool, so they never queue behind slow ones.
             result = await loop.run_in_executor(None, self.censor.precheck, data, mime)
-            if result is None:
+            if result is None and await loop.run_in_executor(None, is_animated, data):
+                # Animations take seconds each: they never hold every
+                # worker, so other tabs' still images keep moving.
+                async with self.animation_slots:
+                    result = await self._run_timed(self.cfg.censor.timeout_seconds,
+                                                   self.censor.censor_bytes, data, mime)
+            elif result is None:
                 result = await self._run_timed(self.cfg.censor.timeout_seconds,
                                                self.censor.censor_bytes, data, mime)
         except Exception as e:
@@ -359,8 +371,9 @@ class CensorAddon:
                 # shouldn't cost the rest of the page.
                 result = await self._run_timed(
                     self.cfg.censor.timeout_seconds * len(matches),
-                    lambda: datauri.censor_data_uris(body, self.censor, fail_closed=fail_closed,
-                                                     matches=matches))
+                    lambda deadline: datauri.censor_data_uris(
+                        body, self.censor, fail_closed=fail_closed, matches=matches,
+                        deadline=deadline))
         except Exception as e:
             reason = _failure_reason(e)
             log.warning("data-URI detection failed for %s: %s", flow.request.pretty_host, reason)
@@ -377,15 +390,17 @@ class CensorAddon:
             self._record(flow, r, mime, source="data-uri")
 
     async def _run_timed(self, timeout: float, fn, *args):
-        """Run fn on the worker pool. The timeout starts when a worker picks
-        the job up, so images queued behind slow ones (big GIFs) aren't
-        failed closed just for waiting."""
+        """Run fn(*args, deadline=...) on the worker pool. The timeout starts
+        when a worker picks the job up, so images queued behind slow ones
+        (big GIFs) aren't failed closed just for waiting. fn stops itself at
+        the deadline: a thread can't be cancelled, and a scan that ran on
+        after wait_for gave up kept its worker for minutes."""
         loop = asyncio.get_running_loop()
         started = asyncio.Event()
 
         def job():
             loop.call_soon_threadsafe(started.set)
-            return fn(*args)
+            return fn(*args, deadline=time.perf_counter() + timeout)
         future = loop.run_in_executor(self.pool, job)
         await started.wait()
         return await asyncio.wait_for(future, timeout=timeout)
@@ -394,6 +409,10 @@ class CensorAddon:
         return (self.cfg.data_uris.enabled and flow.response is not None
                 and flow.response.status_code == 200
                 and self.cfg.data_uris.matches(_mime(flow)))
+
+
+def _animation_slots(cfg: Config) -> asyncio.Semaphore:
+    return asyncio.Semaphore(max(1, cfg.model.workers - cfg.images.still_workers))
 
 
 def strip_accept(accept: str, remove: frozenset[str]) -> str:

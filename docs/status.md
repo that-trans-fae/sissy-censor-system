@@ -40,6 +40,10 @@ Last updated Oct 19, 2026.
 - Queue bypass: images that need no detection (small, unsupported, cached),
   and text bodies whose data URIs are all such images, no longer wait for a
   detection worker
+- Animation lane (Oct 19, 2026): timed-out scans stop at their deadline
+  instead of holding a worker, and animations leave `images.still_workers`
+  workers free for still images (found on redtube.com, where thumbnails
+  waited behind Reddit GIFs from another tab)
 - Page-facing hardening (Oct 19, 2026): no CORS on `/health` and
   `/inject.js`, job endpoints answer only allowlisted origins, no named
   global or script tag left in the page, Referer from the `Origin` header,

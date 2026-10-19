@@ -234,6 +234,11 @@ images:
   max_detect_frames: 48
   # Animations with more frames than this get the same first-frame treatment.
   max_frames: 600
+  # Detection workers kept for still images. Animated images take seconds
+  # each, so they run on at most model.workers minus this many at once
+  # (always at least one), and a page's thumbnails don't queue behind GIFs
+  # another tab is loading.
+  still_workers: 1
   # Pages get a placeholder card over images still loading
   # placeholder_delay_ms after they come into view (usually waiting their
   # turn in the censor), removed when the image arrives or fails. Images

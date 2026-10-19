@@ -101,14 +101,18 @@ class Censor:
         with self._cache_lock:
             return len(self._cache)
 
-    def censor_bytes(self, data: bytes, mime: str | None = None) -> ScanResult:
+    def censor_bytes(self, data: bytes, mime: str | None = None,
+                     deadline: float | None = None) -> ScanResult:
         """Censor female explicit regions in an encoded image.
 
         Returns the original bytes untouched unless something was censored.
         Raises on detection failure; callers decide whether to fail closed.
+        Past `deadline` (a time.perf_counter() value) it raises TimeoutError
+        between frames, so a timed-out animation gives its worker back
+        instead of scanning on after its caller has given up.
         """
         start = time.perf_counter()
-        result = self._scan(data, mime)
+        result = self._scan(data, mime, deadline)
         result.elapsed_ms = (time.perf_counter() - start) * 1000
         return result
 
@@ -167,7 +171,7 @@ class Censor:
             return hit
         return fmt, key
 
-    def _scan(self, data: bytes, mime: str | None) -> ScanResult:
+    def _scan(self, data: bytes, mime: str | None, deadline: float | None) -> ScanResult:
         icfg = self.cfg.images
         quick = self._quick(data, mime)
         if isinstance(quick, ScanResult):
@@ -187,7 +191,7 @@ class Censor:
             return self.fail_closed(data, f"{n_frames} frames exceeds max_frames", first_frame_only=True)
 
         decoded = _decode(data)
-        frame_decisions = self._detect_frames(decoded.frames)
+        frame_decisions = self._detect_frames(decoded.frames, deadline)
         boxes_per_frame = _boxes_per_frame(len(decoded.frames), frame_decisions)
 
         if not any(boxes_per_frame):
@@ -202,7 +206,8 @@ class Censor:
         self._cache_put(key, result)
         return result
 
-    def _detect_frames(self, frames: list[np.ndarray]) -> list[tuple[int, list[Decision]]]:
+    def _detect_frames(self, frames: list[np.ndarray],
+                       deadline: float | None = None) -> list[tuple[int, list[Decision]]]:
         icfg = self.cfg.images
         step = max(icfg.frame_step, math.ceil(len(frames) / icfg.max_detect_frames))
         sampled = list(range(0, len(frames), step))
@@ -214,6 +219,8 @@ class Censor:
             frame = frames[i]
             digest = hashlib.blake2b(frame.tobytes(), digest_size=16).digest()
             if digest not in seen:
+                if deadline is not None and time.perf_counter() > deadline:
+                    raise TimeoutError(f"deadline passed after {len(seen)} of {len(sampled)} frames")
                 bgr = cv2.cvtColor(np.ascontiguousarray(frame[..., :3]), cv2.COLOR_RGB2BGR)
                 seen[digest] = decide(self.detector.detect(bgr), self.cfg.detection)
             out.append((i, seen[digest]))
@@ -236,6 +243,16 @@ class Censor:
             self._cache[key] = result
             while len(self._cache) > self.cfg.cache.max_entries:
                 self._cache.popitem(last=False)
+
+
+def is_animated(data: bytes) -> bool:
+    """Whether an image has more than one frame, from its header (a GIF is
+    read only as far as its second frame)."""
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            return bool(getattr(probe, "is_animated", False))
+    except Exception:
+        return False
 
 
 def _boxes_per_frame(n: int, frame_decisions: list[tuple[int, list[Decision]]]) -> list[list[Box]]:

@@ -42,7 +42,7 @@ def find(body: bytes) -> list[re.Match]:
 def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
                      matches: list[re.Match] | None = None,
                      force_reason: str | None = None, precheck: bool = False,
-                     _depth: int = 0) -> DataUriResult | None:
+                     deadline: float | None = None, _depth: int = 0) -> DataUriResult | None:
     """Run every data-URI image in `body` through censor_bytes and splice the
     results back in.
 
@@ -52,7 +52,8 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
     whole body timed out. With `precheck`, only Censor.precheck is used, and
     the result is None as soon as one image needs the full scan; the caller
     uses this to skip the detection queue for bodies whose images are all
-    tiny placeholders or cached.
+    tiny placeholders or cached. Past `deadline` (see censor_bytes) the
+    remaining images fail closed without detection.
     """
     if matches is None:
         matches = find(body)
@@ -71,7 +72,7 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
                 continue
             inner = censor_data_uris(data, censor, fail_closed=fail_closed,
                                      force_reason=force_reason, precheck=precheck,
-                                     _depth=_depth + 1)
+                                     deadline=deadline, _depth=_depth + 1)
             if inner is None:
                 return None
             results += inner.results
@@ -86,9 +87,9 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
                 return None
         else:
             try:
-                result = censor.censor_bytes(data, mime)
+                result = censor.censor_bytes(data, mime, deadline)
             except Exception as e:
-                reason = f"error: {type(e).__name__}: {e}"
+                reason = "timeout" if isinstance(e, TimeoutError) else f"error: {type(e).__name__}: {e}"
                 result = (censor.fail_closed(data, reason) if fail_closed
                           else ScanResult(data, "error", f"{reason}; fail_closed off, delivered unmodified"))
         results.append((mime, result))

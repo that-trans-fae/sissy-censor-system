@@ -1,11 +1,12 @@
 import io
+import time
 
 import numpy as np
 import pytest
 from conftest import FakeDetector, det
 from PIL import Image
 
-from censor_proxy.imaging import MIME_FORMATS, Censor, sniff
+from censor_proxy.imaging import MIME_FORMATS, Censor, is_animated, sniff
 
 
 def noise(w=200, h=160, mode="RGB", seed=0):
@@ -78,6 +79,28 @@ def test_styles(make_config, style):
     else:
         # Censored region has far less local variation than the noise it replaced.
         assert np.abs(np.diff(region, axis=1)).mean() < 0.5 * np.abs(np.diff(decode(original)[50:90, 50:90], axis=1)).mean()
+
+
+def test_scan_stops_at_its_deadline(make_config):
+    # A timed-out animation must give its worker back, not scan on.
+    cfg = make_config("images: {size_floor_bytes: 0, min_side_px: 1, frame_step: 1}\n"
+                      "cache: {max_entries: 0}\n")
+    frames = [noise(seed=i) for i in range(6)]
+    original = encode(frames[0], "GIF", save_all=True, append_images=frames[1:], duration=50)
+    fake = FakeDetector(lambda bgr: time.sleep(0.05) or [])
+    with pytest.raises(TimeoutError):
+        Censor(cfg, fake).censor_bytes(original, deadline=time.perf_counter() + 0.08)
+    assert fake.calls < len(frames)
+    assert Censor(cfg, fake).censor_bytes(original, deadline=time.perf_counter() + 30).action == "clean"
+
+
+def test_is_animated():
+    frames = [noise(seed=i) for i in range(3)]
+    assert is_animated(encode(frames[0], "GIF", save_all=True, append_images=frames[1:]))
+    assert is_animated(encode(frames[0], "WEBP", save_all=True, append_images=frames[1:]))
+    assert not is_animated(encode(frames[0], "GIF"))
+    assert not is_animated(encode(frames[0], "JPEG"))
+    assert not is_animated(b"not an image")
 
 
 def test_animated_gif_roundtrip_and_frame_sampling(make_config):
