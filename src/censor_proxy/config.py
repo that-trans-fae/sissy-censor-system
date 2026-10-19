@@ -180,6 +180,7 @@ class VideoConfig:
     segment_seconds: float
     seek_wait_seconds: float
     stall_seconds: float
+    skip_speed: float
     max_duration_seconds: float
     max_concurrent_jobs: int
     max_queued_jobs: int
@@ -534,6 +535,8 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("video.segment_seconds must be > 0 and video.seek_wait_seconds >= 0")
     if cfg.video.stall_seconds < 0:
         raise ConfigError("video.stall_seconds must be >= 0")
+    if cfg.video.skip_speed <= 0:
+        raise ConfigError("video.skip_speed must be > 0")
     if cfg.video.abandon_seconds <= 0 or cfg.video.idle_seconds <= 0:
         raise ConfigError("video.abandon_seconds and video.idle_seconds must be > 0")
     a = cfg.video_attribution

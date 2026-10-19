@@ -123,7 +123,11 @@ Last updated Oct 19, 2026.
   through Media Source Extensions, the job restarting where the viewer
   seeks) is tested in Chromium against local MP4 and HLS sources; on a
   real streaming site a far seek into a long video looped restarting
-  (fixed Oct 19, 2026; needs a retest there). HLS plays in
+  (fixed Oct 19, 2026; needs a retest there). On Pornhub a seek could
+  also cut the job short at what was done and stop playback there: ffmpeg
+  can't open fMP4 HLS partway (fixed Oct 19, 2026 by decoding from the
+  start; reproduced against the CDN and a local fMP4 playlist, needs a
+  retest in the browser). HLS plays in
   Chromium on Pornhub (manifest from inline page config, browser-like
   ffmpeg requests); cancelling closed, paused and abandoned jobs is verified with curl only.
   DASH still untested against a real site

@@ -15,7 +15,7 @@ from conftest import FakeDetector, det
 
 from censor_proxy.server import InternalServer
 from censor_proxy.video import (Job, JobRefused, Probe, VideoError, VideoJobs, _net_args, _pump,
-                                censor_video, check_source, output_size)
+                                censor_video, check_source, output_size, probe)
 
 needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 
@@ -166,6 +166,69 @@ def test_a_request_while_the_run_opens_the_source_does_not_restart_it(cfg, tmp_p
     censor_video(job, local_files(cfg, segment_seconds=1), FakeDetector(detect))
     assert asks == 1 and job.runs == 3 and job.done == set(range(6))
     assert job.run_of[4] == (2, 4)
+
+
+def make_test_hls(dir: Path, seconds=6) -> Path:
+    """HLS with fMP4 segments, which ffmpeg can't open partway (Pornhub's)."""
+    dir.mkdir()
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", f"testsrc2=size=320x240:rate=10:duration={seconds}",
+                    "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}", "-c:a", "aac",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "20",
+                    "-f", "hls", "-hls_segment_type", "fmp4", "-hls_time", "2",
+                    "-hls_list_size", "0", "-hls_playlist_type", "vod", str(dir / "in.m3u8")],
+                   check=True)
+    return dir / "in.m3u8"
+
+
+def decode_frames(cmd_input: list[str], data: bytes | None = None) -> np.ndarray:
+    out = subprocess.run(["ffmpeg", "-loglevel", "error", *cmd_input,
+                          "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                         input=data, capture_output=True, check=True).stdout
+    return np.frombuffer(out, np.uint8).reshape(-1, 240, 320).astype(int)
+
+
+@needs_ffmpeg
+def test_seek_into_a_source_ffmpeg_cannot_open_partway(cfg, tmp_path):
+    src = make_test_hls(tmp_path / "hls")
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    calls = 0
+
+    def detect(bgr):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            job.seek(4, wait_segments=1)
+        return []
+    censor_video(job, local_files(cfg, segment_seconds=1), FakeDetector(detect))
+    # Run 2 opened the source at 4 s and got nothing; run 3 decoded from
+    # the start and dropped what came before.
+    assert not job.seekable and job.segments == 6 and job.done == set(range(6))
+    assert job.run_of[4] == (3, 4) and job.run_of[5] == (3, 4)
+    for n in range(6):
+        info = segment_info(job, n)
+        assert sorted(info) == ["audio", "video"] and info["video"]["nb_read_packets"] == "10"
+    # Segment 4 starts on frame 40, not a neighbour.
+    first = decode_frames(["-i", "-", "-frames:v", "1"],
+                          job.init_path(3).read_bytes() + job.segment_path(4).read_bytes())[0]
+    source = decode_frames(["-i", str(src), "-vf", "select=between(n\\,39\\,41)",
+                            "-fps_mode", "passthrough"])
+    assert np.abs(source - first).mean(axis=(1, 2)).argmin() == 1
+
+
+@needs_ffmpeg
+def test_a_source_that_ends_early_fails_rather_than_shortening_the_job(cfg, tmp_path, monkeypatch):
+    src = tmp_path / "in.mp4"
+    make_test_video(src, seconds=2, audio=False)
+    real = probe
+
+    def longer(*args, **kwargs):  # the source says 6 s and delivers 2
+        return replace(real(*args, **kwargs), duration=6.0)
+    monkeypatch.setattr("censor_proxy.video.probe", longer)
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    with pytest.raises(VideoError, match="ended at 2s of 6s"):
+        censor_video(job, local_files(cfg, segment_seconds=1), FakeDetector([]))
+    assert job.segments == 6
 
 
 def stalling_decoder(monkeypatch, after_frames):

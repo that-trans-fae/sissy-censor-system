@@ -132,6 +132,15 @@ job can be restarted anywhere:
   per run now kills its ffmpegs when a seek or cancel goes unanswered for
   2 s, or when no frame has come for `video.stall_seconds` (20 s), in which
   case the job restarts at the segment it was on (Oct 19, 2026).
+- ffmpeg can't open HLS with fMP4 segments partway (Pornhub's): `-ss`
+  gives no frames, video or audio, and a clean exit. A seek run that gets
+  no frames switches the job to decoding from the start and dropping
+  frames before the run's start (`trim`, `atrim`), which costs time in
+  proportion to how far in the seek is (the stall watchdog allows
+  `video.skip_speed`, 4 s of video per second, for it). A run that ends
+  more than a segment short of the probed length fails the job: taking
+  that as the real end once cut a 310 s video to 28 s, and the player,
+  told it had ended, jumped back there and stopped (Oct 19, 2026).
 - After the end, the job goes back for the segments it skipped, so the
   finished copy is complete and later seeks are instant.
 - ffmpeg's HLS muxer writes the segments (fMP4, each renamed into place

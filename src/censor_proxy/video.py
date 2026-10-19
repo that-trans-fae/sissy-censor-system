@@ -108,6 +108,10 @@ class Job:
     # a player that seeks again drops its fetch, but the server goes on
     # waiting on it and would pull the job back.
     requests: int = 0
+    # Whether a run can open the source partway (-ss). ffmpeg 7.1's HLS
+    # reader can't with fMP4 segments: it reads garbage and ends with no
+    # frames. Such a source is decoded from its start and trimmed instead.
+    seekable: bool = True
     # When the current run last showed progress (time.monotonic()): a frame
     # read, or a wait on the attribution scan.
     alive: float = 0.0
@@ -636,11 +640,17 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
         job.position, job.run_first = first, first
         if job.restart_at == first:
             job.restart_at = None
-        job.alive = time.monotonic()  # opening the source counts against stall_seconds
+        # Opening the source counts against stall_seconds, and so does
+        # decoding up to t0 on a source that can't be opened there.
+        skip = 0.0 if job.seekable else t0 / vcfg.skip_speed
+        job.alive = time.monotonic() + skip
     net = _net_args(job, vcfg.source_protocols)
-    seek = ["-ss", f"{t0:.6f}"] if first else []
+    seek = ["-ss", f"{t0:.6f}"] if first and job.seekable else []
+    # Otherwise frames before t0 are decoded and dropped. Half a frame early,
+    # so rounding never drops the one at t0.
+    trim = f"trim=start={t0 - 0.5 / fps:.6f},setpts=PTS-STARTPTS," if first and not seek else ""
     decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *seek, "-i", job.src,
-                  "-map", f"0:{p.video_index}", "-vf", f"scale={w}:{h}", "-r", f"{fps:.6g}",
+                  "-map", f"0:{p.video_index}", "-vf", f"{trim}scale={w}:{h}", "-r", f"{fps:.6g}",
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     encode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", f"{fps:.6g}",
@@ -648,6 +658,8 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
     if job.audio:
         encode_cmd += [*net, *seek, "-i", job.src, "-map", "0:v", "-map", f"1:{p.audio_index}",
                        "-c:a", "aac", "-b:a", "128k", "-shortest"]
+        if trim:
+            encode_cmd += ["-af", f"atrim=start={t0:.6f},asetpts=PTS-STARTPTS"]
     else:
         encode_cmd += ["-map", "0:v"]
     encode_cmd += ["-c:v", "libx264", "-preset", vcfg.preset, "-crf", str(vcfg.crf),
@@ -670,9 +682,11 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
     if attribution_detector and acfg.enabled:
         # From history_seconds back, so the run's first moments have their window.
         scan_t0 = max(0.0, t0 - acfg.history_seconds)
-        scan_seek = ["-ss", f"{scan_t0:.6f}"] if scan_t0 else []
+        scan_seek = ["-ss", f"{scan_t0:.6f}"] if scan_t0 and job.seekable else []
+        scan_trim = f"trim=start={scan_t0:.6f},setpts=PTS-STARTPTS," if scan_t0 and not scan_seek else ""
         scan_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *scan_seek, "-i", job.src,
-                    "-map", f"0:{p.video_index}", "-vf", f"fps={acfg.sample_fps:.6g},scale={w}:{h}",
+                    "-map", f"0:{p.video_index}",
+                    "-vf", f"{scan_trim}fps={acfg.sample_fps:.6g},scale={w}:{h}",
                     "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
         scanner = Scanner(scan_cmd, w, h, acfg, attribution_detector,
                           name=f"attrib-{job.id[:8]}", t0=scan_t0)
@@ -733,13 +747,23 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
     last = first + math.ceil(frames / seg)  # one past the last segment this run fed
     for n in range(first, last):
         job.check(n)  # the encoder wrote the last ones as it finished
+    # The probe's duration is only an estimate, so the real end may come up
+    # to a segment before it; earlier means the read failed.
+    short = stopped == "end" and job.segments is not None and last < job.segments - 1
+    if short and not frames and seek:
+        log.warning("video %s: no frames after seeking to %.1fs; decoding from the start instead",
+                    job.id, t0)
+        job.update(seekable=False)
+        return first
+    if short:
+        raise VideoError(f"the source ended at {last * job.segment_seconds:.0f}s "
+                         f"of {job.duration:.0f}s")
     if stopped == "end":
         if not last:
             raise VideoError("the source has no video frames")
         if frames and not job.check(first):
             raise VideoError("the encoder wrote no segments")
-        # The real length; the probe's duration is only an estimate.
-        job.update(segments=last)
+        job.update(segments=last)  # the real length
     restart = job.take_restart()
     if restart is not None and not job.check(restart):
         return restart
