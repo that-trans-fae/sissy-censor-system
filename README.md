@@ -231,8 +231,8 @@ check to pass, and rolls back to the old one if it does not. The result shows on
 automatic updates off there, or pin a version by setting the channel in
 `.env` to a tag such as `thattransfae/scs:1.2.0`.
 
-**4. Chromium.** The snap or distribution package on Linux, Homebrew's
-`ungoogled-chromium` cask on macOS, Hibbiki's build from its GitHub release on Windows, checked
+**4. Chromium.** The snap or distribution package on Linux, ungoogled-chromium's
+build from its GitHub release on macOS, Hibbiki's build from its GitHub release on Windows, checked
 against the release's SHA-256 (plus the sqlite3 tool from winget, which
 the Windows installer uses to write the certificate store). If Chromium is
 already installed it is reused, or updated if it is older than 134.

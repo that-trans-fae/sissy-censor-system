@@ -90,6 +90,8 @@ pkg_install() {
   esac
 }
 
+# Homebrew, which installed Docker Desktop and Chromium on macOS before
+# Oct 2026; only the uninstall still uses it, for those installs.
 brew_bin() {
   if [ -x /opt/homebrew/bin/brew ]; then echo /opt/homebrew/bin/brew
   elif [ -x /usr/local/bin/brew ]; then echo /usr/local/bin/brew
@@ -97,78 +99,58 @@ brew_bin() {
   fi
 }
 
-# The Command Line Tools (or Xcode), checked by path: running xcrun or git
-# without them opens Apple's install window.
-have_clt() {
-  local dev; dev=$(xcode-select -p 2>/dev/null) && [ -x "$dev/usr/bin/git" ]
+# python3, if it really runs: on macOS without the Command Line Tools,
+# /usr/bin/python3 is a stub that opens Apple's install window.
+have_python3() {
+  have python3 || return 1
+  [ "$OS" = Darwin ] && [ "$(command -v python3)" = /usr/bin/python3 ] || return 0
+  local dev; dev=$(xcode-select -p 2>/dev/null) && [ -x "$dev/usr/bin/python3" ]
 }
 
-# Homebrew needs the Command Line Tools: their git to update itself and
-# swift to install casks. A macOS upgrade can leave them missing, and
-# Homebrew then silently stops updating and falls behind the running macOS.
-# Homebrew's installer, run again over an existing install, installs the
-# tools without a window (softwareupdate) and brings Homebrew up to date.
-# Non-interactive, it only uses sudo that is already unlocked, so sudo is
-# unlocked first and kept so while it runs (the tools take minutes).
-ensure_brew() {
-  if [ -n "$(brew_bin)" ] && have_clt; then return; fi
-  if [ -n "$(brew_bin)" ]; then log "Repairing Homebrew (installing the Command Line Tools)"
-  else log "Installing Homebrew"
-  fi
-  sudo -v
-  while kill -0 $$ 2>/dev/null && sleep 50; do sudo -n true 2>/dev/null || exit; done &
-  local keep=$!
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
-  kill "$keep" 2>/dev/null || true
-  [ -n "$(brew_bin)" ] || die "Homebrew did not install; see its output above"
-  have_clt || die "the Command Line Tools did not install; run 'xcode-select --install', then run this again"
+# Downloads, removed on exit.
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/scs-install.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
+
+# ------------------------------------------------------------- macOS apps
+# Docker Desktop and Chromium come straight from their publishers, for this
+# Mac's CPU, not from Homebrew: Homebrew's installer refuses Intel Macs
+# (Sep 2026), and an existing Homebrew can be too old to pick the Intel
+# build or, once a macOS upgrade removed the Command Line Tools, unable to
+# install anything. Nothing here needs those tools.
+
+# arm64 on Apple silicon (even in a Rosetta shell, where uname -m says
+# x86_64), x86_64 on Intel.
+mac_arch() {
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then echo arm64; else echo x86_64; fi
 }
 
-# Runs a brew cask command (install), updating Homebrew first
-# (once). An old Homebrew can't read the current cask definitions
-# ("Unexpected method ... called on Cask") and exits non-zero even when the
-# app got installed, so callers check the app rather than the exit status.
-# It also doesn't know newer macOS releases, under which casks list their
-# Intel downloads, and so installs the Apple silicon build on an Intel Mac.
-BREW_UPDATED=0
-brew_cask() {
-  local brew; brew=$(brew_bin)
-  if [ "$BREW_UPDATED" -eq 0 ]; then
-    log "Updating Homebrew"
-    "$brew" update || warn "Homebrew did not update; using the version you have"
-    BREW_UPDATED=1
-  fi
-  "$brew" "$1" --cask "${@:2}"
-}
-
-# True when an app's executable can run on this Mac. Apple silicon runs
-# either build (Intel ones through Rosetta); an Intel Mac needs x86_64.
-# hw.optional.arm64 is 1 on Apple silicon even in a Rosetta shell, where
-# uname -m says x86_64.
+# True when an app's executable can run on this Mac: Apple silicon runs
+# either build (Intel ones through Rosetta), an Intel Mac needs x86_64.
 app_runs_here() {
-  [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && return 0
+  [ "$(mac_arch)" = arm64 ] && return 0
   local exe
   exe=$(defaults read "$1/Contents/Info" CFBundleExecutable 2>/dev/null) || return 0
   file -b "$1/Contents/MacOS/$exe" | grep -q x86_64
 }
 
-# Installs a cask's app, or reinstalls it when the installed one is the
-# wrong build for this Mac.
-install_cask_app() {
-  local cask=$1 app=$2 name=$3
-  if [ ! -d "$app" ]; then
-    log "Installing $name"
-    brew_cask install "$cask" || true
-  elif ! app_runs_here "$app"; then
-    # --force replaces the app even where Homebrew lost track of it.
-    log "$name is the Apple silicon build; reinstalling the Intel one"
-    brew_cask install "$cask" --force || true
-  else
-    return 0
-  fi
-  [ -d "$app" ] || die "$name did not install; see Homebrew's output above"
-  app_runs_here "$app" || die "Homebrew installed the Apple silicon build of $name on this Intel Mac; update Homebrew ('brew update', or reinstall it from https://brew.sh) and run this again"
+# Downloads a URL to a file and checks it against a SHA-256 (hex).
+download_verified() {
+  curl -fL --retry 3 --progress-bar -o "$2" "$1" || die "could not download $1"
+  [ "$(shasum -a 256 "$2" | awk '{ print $1 }')" = "$3" ] || die "$1 failed its SHA-256 check"
 }
+
+# Mounts a disk image read-only and out of the Finder; prints where.
+dmg_attach() {
+  local mnt; mnt=$(mktemp -d "$WORK/dmg.XXXXXX")
+  hdiutil attach -quiet -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$1" || return 1
+  echo "$mnt"
+}
+dmg_detach() {
+  hdiutil detach -quiet "$1" 2>/dev/null || hdiutil detach -quiet -force "$1" 2>/dev/null || true
+}
+
+# Removes an app bundle, with sudo when this user can't.
+remove_app() { rm -rf "$1" 2>/dev/null || sudo rm -rf "$1"; }
 
 # ------------------------------------------------------------------ docker
 # Docker Engine from Docker's own repositories (Arch: the distribution's).
@@ -207,27 +189,57 @@ install_docker_linux() {
   esac
 }
 
+# Docker's own installer from its disk image, checked against the checksum
+# Docker publishes next to it. --user does the privileged setup now, so the
+# first start asks for no password, and --accept-license, when the agreement
+# was accepted on the terminal, skips its window.
 install_docker_desktop_macos() {
-  ensure_brew
-  install_cask_app docker-desktop /Applications/Docker.app "Docker Desktop"
-  setup_docker_desktop_macos
+  local app=/Applications/Docker.app
+  if [ -d "$app" ] && app_runs_here "$app"; then
+    log "Docker Desktop is already installed"
+    setup_docker_desktop_macos
+    return
+  fi
+  if [ -d "$app" ]; then
+    log "Removing the Apple silicon build of Docker Desktop"
+    remove_app "$app"
+  fi
+  local arch=amd64; [ "$(mac_arch)" = x86_64 ] || arch=arm64
+  local base="https://desktop.docker.com/mac/main/$arch" sum
+  log "Downloading Docker Desktop"
+  sum=$(curl -fsSL "$base/checksums.txt" | awk '$2 ~ /Docker\.dmg$/ { print $1; exit }') || true
+  [ -n "$sum" ] || die "could not read Docker Desktop's checksum from $base/checksums.txt"
+  download_verified "$base/Docker.dmg" "$WORK/Docker.dmg" "$sum"
+  local license=
+  if accept_docker_terms; then license=--accept-license; fi
+  log "Installing Docker Desktop"
+  local mnt; mnt=$(dmg_attach "$WORK/Docker.dmg") || die "could not open Docker Desktop's disk image"
+  if ! sudo "$mnt/Docker.app/Contents/MacOS/install" ${license:+"$license"} --user="$USER"; then
+    dmg_detach "$mnt"
+    die "Docker Desktop's installer failed"
+  fi
+  dmg_detach "$mnt"
+  rm -f "$WORK/Docker.dmg"
 }
 
 # Docker Desktop's first start asks, in its own window, to accept the Docker
 # Subscription Service Agreement and for an admin password for its helpers.
-# Its install command does both up front (--accept-license, --user), so the
-# agreement is asked here in the terminal instead. Only before that first
-# start: Docker Desktop writes its settings store then.
+# The agreement is asked here on the terminal instead.
 DOCKER_TERMS=https://www.docker.com/legal/docker-subscription-service-agreement
+accept_docker_terms() {
+  echo "    Docker Desktop needs the Docker Subscription Service Agreement accepted:"
+  echo "    $DOCKER_TERMS"
+  ask "Accept it?" && return 0
+  echo "    Then accept it in Docker Desktop's window when it opens."
+  return 1
+}
+
+# An installed Docker Desktop that has never started (it writes its settings
+# store then) gets the same setup from its own install command.
 setup_docker_desktop_macos() {
   local group="$HOME/Library/Group Containers/group.com.docker"
   [ -e "$group/settings-store.json" ] || [ -e "$group/settings.json" ] && return
-  echo "    Docker Desktop needs the Docker Subscription Service Agreement accepted:"
-  echo "    $DOCKER_TERMS"
-  if ! ask "Accept it?"; then
-    echo "    Then accept it in Docker Desktop's window when it opens."
-    return
-  fi
+  accept_docker_terms || return 0
   log "Setting up Docker Desktop"
   sudo /Applications/Docker.app/Contents/MacOS/install --accept-license --user="$USER" \
     || warn "Docker Desktop's setup failed; accept the agreement in its window when it opens"
@@ -446,16 +458,43 @@ uninstall_updater() {
 }
 
 # ---------------------------------------------------------------- chromium
+# ungoogled-chromium's latest release for this Mac's CPU, checked against
+# the digest GitHub lists for it: the same Chromium.app as the plain build
+# (Homebrew's chromium cask is disabled, Sep 2026), with H.264 for the video
+# control. It isn't notarized; curl sets no quarantine flag, and the flag is
+# cleared anyway. The release is read with JavaScript for Automation, since
+# python3 may be Apple's stub.
+CHROMIUM_RELEASE=https://api.github.com/repos/ungoogled-software/ungoogled-chromium-macos/releases/latest
+install_chromium_macos() {
+  local app=/Applications/Chromium.app
+  if [ -d "$app" ] && app_runs_here "$app"; then return; fi
+  log "Downloading Chromium (ungoogled-chromium)"
+  local json asset url sum
+  json=$(curl -fsSL "$CHROMIUM_RELEASE") || die "could not read $CHROMIUM_RELEASE"
+  asset=$(osascript -l JavaScript -e 'function run(a) {
+    const x = JSON.parse(a[0]).assets.find(x => x.name.endsWith("_" + a[1] + "-macos.dmg"));
+    return x ? x.browser_download_url + " " + (x.digest || "").replace(/^sha256:/, "") : "";
+  }' "$json" "$(mac_arch)") || true
+  url=${asset%% *}; sum=${asset#* }
+  [ -n "$url" ] && [ -n "$sum" ] && [ "$url" != "$sum" ] \
+    || die "found no $(mac_arch) Chromium with a checksum in $CHROMIUM_RELEASE"
+  download_verified "$url" "$WORK/chromium.dmg" "$sum"
+  [ ! -d "$app" ] || remove_app "$app"
+  local mnt; mnt=$(dmg_attach "$WORK/chromium.dmg") || die "could not open Chromium's disk image"
+  if ! { ditto "$mnt/Chromium.app" "$app" 2>/dev/null || sudo ditto "$mnt/Chromium.app" "$app"; }; then
+    dmg_detach "$mnt"
+    die "could not copy Chromium to /Applications"
+  fi
+  dmg_detach "$mnt"
+  rm -f "$WORK/chromium.dmg"
+  xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
+}
+
 # Prints the Chromium command; installs it first if missing.
 CHROMIUM=
 install_chromium() {
   if [ "$OS" = Darwin ]; then
-    # Homebrew disabled its chromium cask (Sep 2026, fails Gatekeeper).
-    # ungoogled-chromium installs the same Chromium.app, with H.264 for
-    # the video control. It isn't notarized, so the quarantine flag comes
-    # off (current Homebrew dropped --no-quarantine).
-    install_cask_app ungoogled-chromium /Applications/Chromium.app Chromium
-    xattr -dr com.apple.quarantine /Applications/Chromium.app 2>/dev/null || true
+    install_chromium_macos
     CHROMIUM=/Applications/Chromium.app/Contents/MacOS/Chromium
     return
   fi
@@ -552,14 +591,18 @@ FEATURES=--enable-features=EnableCertManagementUIV2Write
 if [ ! -s "\$DB" ]; then
   "\$CHROMIUM" --user-data-dir="\$PROFILE" "\$FEATURES" --headless=new --disable-gpu --no-first-run --dump-dom about:blank >/dev/null 2>&1
 fi
-if [ -s "\$DB" ] && [ -s "\$CA" ]; then
+# trust_settings is a CertificateMetadata protobuf: trust { trust_type: TRUSTED }
+if [ -s "\$DB" ] && [ -s "\$CA" ] && command -v sqlite3 >/dev/null && command -v openssl >/dev/null; then
+  DIGEST=\$(openssl x509 -in "\$CA" -outform DER | openssl dgst -sha256 | awk '{ print \$NF }' | tr a-f A-F)
+  DER=\$(openssl x509 -in "\$CA" -outform DER | od -An -v -tx1 | tr -d ' \\n')
+  sqlite3 "\$DB" "insert or ignore into certificates values ('\$DIGEST', X'\$DER', X'0a020803');" 2>/dev/null
+elif [ -s "\$DB" ] && [ -s "\$CA" ]; then
   python3 - "\$DB" "\$CA" <<'PY' 2>/dev/null
 import base64, hashlib, sqlite3, sys
 db, ca = sys.argv[1:]
 pem = open(ca).read()
 der = base64.b64decode("".join(l for l in pem.splitlines() if not l.startswith("-----")))
 digest = hashlib.sha256(der).hexdigest().upper()
-# trust_settings is a CertificateMetadata protobuf: trust { trust_type: TRUSTED }
 c = sqlite3.connect(db)
 c.execute("insert or ignore into certificates values (?, ?, ?)", (digest, der, bytes.fromhex("0a020803")))
 c.commit()
@@ -588,7 +631,12 @@ init_profile() {
   fi
   log "Initialising the profile and trusting the proxy CA in it"
   "$LAUNCHER" --headless=new --disable-gpu --dump-dom about:blank >/dev/null 2>&1 || true
-  if ! python3 -c 'import sqlite3,sys; sys.exit(0 if sqlite3.connect(sys.argv[1]).execute("select count(*) from certificates").fetchone()[0] else 1)' "$base/Default/ServerCertificate" 2>/dev/null; then
+  local db="$base/Default/ServerCertificate" n=0
+  if have sqlite3; then n=$(sqlite3 "$db" 'select count(*) from certificates' 2>/dev/null) || n=0
+  elif have_python3; then
+    n=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from certificates").fetchone()[0])' "$db" 2>/dev/null) || n=0
+  fi
+  if [ "${n:-0}" -eq 0 ] 2>/dev/null; then
     warn "the CA was not written to the profile store; the browser will warn on HTTPS pages (Chromium 134 or newer is needed)"
   fi
 }
@@ -712,7 +760,7 @@ seed_profile() {
 }
 EOF
   elif ! grep -q "$ADMIN_URL" "$bookmarks"; then
-    have python3 || { warn "python3 is needed to edit $bookmarks; add $ADMIN_URL by hand"; return; }
+    have_python3 || { warn "python3 is needed to edit $bookmarks; add $ADMIN_URL by hand"; return; }
     python3 - "$bookmarks" "$ADMIN_BOOKMARK" "$ADMIN_URL" <<'EOF'
 import json, sys
 path, name, url = sys.argv[1:]
@@ -727,7 +775,7 @@ EOF
   fi
   if [ ! -s "$prefs" ]; then
     printf '{ "bookmark_bar": { "show_on_all_tabs": true } }\n' >"$prefs"
-  elif ! grep -q '"show_on_all_tabs": true' "$prefs" && have python3; then
+  elif ! grep -q '"show_on_all_tabs": true' "$prefs" && have_python3; then
     python3 - "$prefs" <<'EOF'
 import json, sys
 path = sys.argv[1]
@@ -843,7 +891,11 @@ remove_docker() {
   local brew; brew=$(brew_bin)
   if [ -n "$brew" ] && "$brew" list --cask docker-desktop >/dev/null 2>&1; then "$brew" uninstall --zap --cask docker-desktop
   elif [ -n "$brew" ] && "$brew" list --cask docker >/dev/null 2>&1; then "$brew" uninstall --zap --cask docker
-  else warn "Docker Desktop was not installed by Homebrew; uninstall it from its Troubleshoot menu"
+  elif [ -x /Applications/Docker.app/Contents/MacOS/uninstall ]; then
+    /Applications/Docker.app/Contents/MacOS/uninstall || warn "Docker Desktop's uninstaller failed"
+    rm -rf "$HOME/Library/Group Containers/group.com.docker" "$HOME/.docker"
+    [ ! -d /Applications/Docker.app ] || remove_app /Applications/Docker.app
+  else warn "Docker Desktop's uninstaller is missing; uninstall it from its Troubleshoot menu"
   fi
 }
 
@@ -854,7 +906,7 @@ remove_chromium() {
     local brew; brew=$(brew_bin)
     if [ -n "$brew" ] && "$brew" list --cask ungoogled-chromium >/dev/null 2>&1; then "$brew" uninstall --cask ungoogled-chromium
     elif [ -n "$brew" ] && "$brew" list --cask chromium >/dev/null 2>&1; then "$brew" uninstall --cask chromium
-    else warn "Chromium was not installed by Homebrew; drag $c to the Trash"
+    else remove_app "$c"
     fi
     return
   fi

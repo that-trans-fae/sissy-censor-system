@@ -24,9 +24,10 @@ Every step the scripts take is also written out under
 
 ## Dedicated browser
 
-Installs Chromium (snap or distribution package on Linux, Homebrew's `ungoogled-chromium` cask on
-macOS, since its `chromium` cask is disabled, Hibbiki's build from its GitHub release on Windows, verified against
-the release's SHA-256) and adds a **Sissy Browser** launcher with its
+Installs Chromium (snap or distribution package on Linux,
+ungoogled-chromium's build for the Mac's CPU from its GitHub release on
+macOS, Hibbiki's build from its GitHub release on Windows, both verified
+against the release's SHA-256) and adds a **Sissy Browser** launcher with its
 own icon (`docs/brand/browser-icon.svg`, shipped in the image). It opens a separate profile with
 `--proxy-server=127.0.0.1:8080` and trusts the proxy's CA in that profile's
 own certificate store (the "Installed by you" list in
@@ -218,14 +219,24 @@ sudo usermod -aG docker "$USER"
 The group takes effect at your next login; until then put `sudo` in front
 of every `docker` command below.
 
-macOS and Windows: install Docker Desktop (`brew install --cask
-docker-desktop`, or `winget install Docker.DockerDesktop`; Windows needs
-WSL 2 first, `wsl --install --no-distribution` from an elevated PowerShell
-and a reboot). On macOS, Homebrew needs the Command Line Tools
-(`xcode-select --install`; a macOS upgrade can remove them) and should be
-current (`brew update`): an outdated one installs the Apple silicon build
-on an Intel Mac. Start Docker Desktop, accept the service agreement in its
-window, and wait until `docker info` works.
+macOS: download `Docker.dmg` for your Mac's CPU
+(`https://desktop.docker.com/mac/main/arm64/Docker.dmg` on Apple silicon,
+`.../amd64/Docker.dmg` on Intel; `checksums.txt` next to it has its
+SHA-256), then run its installer, which with `--accept-license` accepts
+the [Docker Subscription Service Agreement](https://www.docker.com/legal/docker-subscription-service-agreement)
+and with `--user` does the setup that otherwise asks for a password on
+first start:
+
+```bash
+hdiutil attach -nobrowse -mountpoint /tmp/docker-dmg Docker.dmg
+sudo /tmp/docker-dmg/Docker.app/Contents/MacOS/install --accept-license --user="$USER"
+hdiutil detach /tmp/docker-dmg
+```
+
+Windows: `winget install Docker.DockerDesktop` (it needs WSL 2 first,
+`wsl --install --no-distribution` from an elevated PowerShell and a
+reboot). Start Docker Desktop, accept the service agreement in its window
+if it asks, and wait until `docker info` works.
 
 ### 2. The proxy
 
@@ -325,10 +336,14 @@ The admin panel is at <http://localhost:8082/admin>.
 
 Chromium 134 or newer, for the per-profile certificate store the next step
 uses: `sudo snap install chromium` on Ubuntu, otherwise the `chromium`
-package (apt, dnf, pacman); on macOS `brew install --cask
-ungoogled-chromium` (Homebrew's `chromium` cask is disabled) followed by
-`xattr -dr com.apple.quarantine /Applications/Chromium.app`, since the
-build isn't notarized; on Windows the `mini_installer.exe` from
+package (apt, dnf, pacman); on macOS the `_arm64-macos.dmg` (Apple
+silicon) or `_x86_64-macos.dmg` (Intel) from
+[ungoogled-chromium's latest release](https://github.com/ungoogled-software/ungoogled-chromium-macos/releases/latest),
+checked against the SHA-256 on the release page, with `Chromium.app`
+copied to `/Applications` (Homebrew's `chromium` cask is disabled, and
+this build plays the proxy's H.264 video); a browser download marks it
+quarantined, and since it isn't notarized, clear that with
+`xattr -dr com.apple.quarantine /Applications/Chromium.app`; on Windows the `mini_installer.exe` from
 [Hibbiki's latest release](https://github.com/Hibbiki/chromium-win64/releases/latest),
 checked against the SHA-256 on the release page.
 
