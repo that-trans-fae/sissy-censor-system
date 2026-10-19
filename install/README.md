@@ -43,10 +43,13 @@ Linux and macOS:
 curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 ```
 
-Windows, from a normal PowerShell:
+Windows, pasted into a normal PowerShell window. Don't wrap it in
+`powershell -ExecutionPolicy Bypass -c "..."`: Defender blocks that command
+line as `Trojan:Win32/Commando.A!ml` before the script is even fetched.
+Execution policy doesn't apply to `iex`, so the flag isn't needed.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
+irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex
 ```
 
 Where it lands:
@@ -130,7 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
+$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
 ```
 
 Rerunning the installer is safe: it installs the channel's current

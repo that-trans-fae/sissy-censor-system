@@ -10,17 +10,25 @@ its CA in the profile's own certificate store. Nothing system-wide changes:
 no Windows proxy, no CA in the Windows store, and your usual browsers are
 untouched. Linux and macOS: install/browser.sh.
 
-Run from a normal PowerShell (winget asks for elevation when it needs it):
+Paste into a normal PowerShell window (winget asks for elevation when it
+needs it):
 
-  powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
+  irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex
+
+Not "powershell -ExecutionPolicy Bypass -c ..." from cmd or Run: Defender
+blocks that command line as Trojan:Win32/Commando.A!ml, and execution policy
+doesn't apply to iex anyway. Since the script runs in the window's own
+session, it keeps to a child scope and stops with throw, never exit, which
+would close the window.
 
 Remove the shortcut, its profile and the update task (keeps Docker Desktop,
 Chromium and %USERPROFILE%\scs):
 
-  powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
+  $env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
 
 Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE.
 #>
+& {
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------- settings
@@ -50,7 +58,7 @@ $Shortcuts = @(
 # ----------------------------------------------------------------- helpers
 function Log($msg)  { Write-Host "==> $msg" -ForegroundColor Magenta }
 function Warn($msg) { Write-Host "warning: $msg" -ForegroundColor Yellow }
-function Die($msg)  { Write-Host "error: $msg" -ForegroundColor Red; exit 1 }
+function Die($msg)  { throw $msg }   # reported by the catch around main
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
@@ -405,26 +413,27 @@ function Uninstall-Shortcuts {
 }
 
 # -------------------------------------------------------------------- main
-if ($Uninstall) {
-    Uninstall-Shortcuts
-    Uninstall-Updater
-    Log "Done. Docker Desktop, Chromium and $ScsDir were left in place; stop the proxy with"
-    Write-Host "    cd $ScsDir; docker compose down"
-    exit 0
-}
+try {
+    if ($Uninstall) {
+        Uninstall-Shortcuts
+        Uninstall-Updater
+        Log "Done. Docker Desktop, Chromium and $ScsDir were left in place; stop the proxy with"
+        Write-Host "    cd $ScsDir; docker compose down"
+        return
+    }
 
-Install-DockerDesktop
-Start-DockerDesktop
-Get-Proxy
-Start-Proxy
-$chromium = Install-Chromium
-Install-Shortcuts $chromium
-Seed-Profile
-Trust-CaInProfile $chromium
-Install-Updater
+    Install-DockerDesktop
+    Start-DockerDesktop
+    Get-Proxy
+    Start-Proxy
+    $chromium = Install-Chromium
+    Install-Shortcuts $chromium
+    Seed-Profile
+    Trust-CaInProfile $chromium
+    Install-Updater
 
-Log 'Installed'
-Write-Host @"
+    Log 'Installed'
+    Write-Host @"
     Shortcut:     $BrowserName (Start menu and desktop)
     Profile:      $ProfileDir (bookmark bar: $AdminBookmark)
     Proxy:        $ProxyHost`:$ProxyPort (Docker, starts with Windows)
@@ -434,3 +443,7 @@ Write-Host @"
     The CA is trusted inside the profile: rerun this installer if you ever
     delete $ScsDir\mitmproxy and the proxy makes a new CA.
 "@
+} catch {
+    Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
+}
+}

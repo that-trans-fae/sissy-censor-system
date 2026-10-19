@@ -116,10 +116,11 @@ normal user:
 curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | bash
 ```
 
-Windows 10 or 11, in a normal PowerShell window:
+Windows 10 or 11, pasted into a normal PowerShell window (not cmd or the
+Run box):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
+irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex
 ```
 
 The script asks for your password (sudo) or an elevation prompt (winget)
@@ -154,7 +155,7 @@ curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex"
+$env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
 ```
 
 [`install/README.md`](install/README.md) covers the environment variables
