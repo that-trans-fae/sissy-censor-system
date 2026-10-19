@@ -3,9 +3,10 @@
 #
 # Installs Docker Desktop, clones the repository, builds and starts the
 # proxy, installs Chromium and adds a "Sissy Browser" launcher: a separate
-# Chromium profile that always goes through the proxy and trusts only its
-# CA. Nothing system-wide changes: no system proxy, no CA in the system
-# store, and your usual browsers are untouched. Windows: install/browser.ps1.
+# Chromium profile that always goes through the proxy and trusts its CA in
+# the profile's own certificate store. Nothing system-wide changes: no
+# system proxy, no CA in the system store, and your usual browsers are
+# untouched. Windows: install/browser.ps1.
 #
 # Run as your normal user (not root); sudo is asked for where it is needed:
 #
@@ -172,8 +173,15 @@ start_proxy() {
     [ "$waited" -lt 120 ] || die "the proxy did not write its CA to $CA_PEM"
     sleep 2; waited=$((waited + 2))
   done
-  curl -fsS -x "http://$PROXY_HOST:$PROXY_PORT" http://censor.local/health >/dev/null \
-    || warn "health check through the proxy failed; check 'docker compose logs' in $SCS_DIR/src"
+  # The container takes a few seconds to load the models after (re)creation.
+  waited=0
+  until curl -fsS -x "http://$PROXY_HOST:$PROXY_PORT" http://censor.local/health >/dev/null 2>&1; do
+    if [ "$waited" -ge 60 ]; then
+      warn "health check through the proxy failed; check 'docker compose logs' in $SCS_DIR/src"
+      break
+    fi
+    sleep 3; waited=$((waited + 3))
+  done
 }
 
 # ---------------------------------------------------------------- chromium
@@ -205,6 +213,12 @@ install_chromium() {
   [ -n "$CHROMIUM" ] || die "could not find a chromium command after installing it"
 }
 
+# Chromium's SingletonLock is a dangling symlink (to host-pid), so -e misses it.
+profile_in_use() {
+  local base; base=$(profile_dir)
+  [ -L "$base/SingletonLock" ] || [ -e "$base/SingletonLock" ] || [ -S "$base/SingletonSocket" ]
+}
+
 # The profile directory. Snap Chromium can only reach its own home area.
 profile_dir() {
   if [ "$OS" = Linux ] && [ -d "$HOME/snap/chromium" ]; then echo "$HOME/snap/chromium/common/$BROWSER_ID"
@@ -213,10 +227,12 @@ profile_dir() {
   fi
 }
 
-# The launcher. The CA's SPKI hash is computed at every launch, so a
+# The launcher. Before starting Chromium it adds the proxy CA to the
+# profile's own certificate store (the "Installed by you" list in
+# chrome://certificate-manager, a SQLite file Chromium creates on first
+# start), so no command-line flag and no system-wide trust is needed, and a
 # regenerated CA (after deleting src/mitmproxy/) needs no reinstall.
-# mitmproxy signs each site certificate with the CA's own key pair, which is
-# why the CA's SPKI matches the certificates Chromium sees.
+LAUNCHER=
 write_launcher() {
   local path=$1
   mkdir -p "$(dirname "$path")"
@@ -225,19 +241,57 @@ write_launcher() {
 # $BROWSER_NAME: Chromium pinned to the Sissy Censor System proxy.
 SCS_DIR="$SCS_DIR"
 PROFILE="$(profile_dir)"
+CHROMIUM="$CHROMIUM"
 CA="\$SCS_DIR/src/mitmproxy/mitmproxy-ca-cert.pem"
+DB="\$PROFILE/Default/ServerCertificate"
+
 # Start the proxy if Docker is up and it is not running yet.
-(cd "\$SCS_DIR/src" && timeout 30 docker compose up -d >/dev/null 2>&1) || true
-spki=\$(openssl x509 -in "\$CA" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | openssl dgst -sha256 -binary | base64)
-exec "$CHROMIUM" \\
+if command -v timeout >/dev/null 2>&1; then t="timeout 30"; else t=""; fi
+(cd "\$SCS_DIR/src" && \$t docker compose up -d >/dev/null 2>&1) || true
+
+# Trust the proxy CA in this profile's certificate store. Chromium creates
+# the store on first start, so a new profile is initialised headless first.
+if [ ! -s "\$DB" ]; then
+  "\$CHROMIUM" --user-data-dir="\$PROFILE" --headless=new --disable-gpu --no-first-run --dump-dom about:blank >/dev/null 2>&1
+fi
+if [ -s "\$DB" ] && [ -s "\$CA" ]; then
+  python3 - "\$DB" "\$CA" <<'PY' 2>/dev/null
+import base64, hashlib, sqlite3, sys
+db, ca = sys.argv[1:]
+pem = open(ca).read()
+der = base64.b64decode("".join(l for l in pem.splitlines() if not l.startswith("-----")))
+digest = hashlib.sha256(der).hexdigest().upper()
+# trust_settings is a CertificateMetadata protobuf: trust { trust_type: TRUSTED }
+c = sqlite3.connect(db)
+c.execute("insert or ignore into certificates values (?, ?, ?)", (digest, der, bytes.fromhex("0a020803")))
+c.commit()
+PY
+fi
+
+exec "\$CHROMIUM" \\
   --user-data-dir="\$PROFILE" \\
   --proxy-server="$PROXY_HOST:$PROXY_PORT" \\
-  --ignore-certificate-errors-spki-list="\$spki" \\
   --class=SissyBrowser \\
   --no-first-run --no-default-browser-check \\
   "\$@"
 EOF
   chmod +x "$path"
+  LAUNCHER=$path
+}
+
+# Runs the launcher once headless so the profile exists with the CA trusted
+# before the first real launch.
+init_profile() {
+  local base; base=$(profile_dir)
+  if profile_in_use; then
+    warn "$BROWSER_NAME is running; the launcher trusts the proxy CA when it is next started"
+    return
+  fi
+  log "Initialising the profile and trusting the proxy CA in it"
+  "$LAUNCHER" --headless=new --disable-gpu --dump-dom about:blank >/dev/null 2>&1 || true
+  if ! python3 -c 'import sqlite3,sys; sys.exit(0 if sqlite3.connect(sys.argv[1]).execute("select count(*) from certificates").fetchone()[0] else 1)' "$base/Default/ServerCertificate" 2>/dev/null; then
+    warn "the CA was not written to the profile store; the browser will warn on HTTPS pages (Chromium 134 or newer is needed)"
+  fi
 }
 
 install_launcher_linux() {
@@ -245,29 +299,35 @@ install_launcher_linux() {
   local bin="$HOME/.local/bin/$BROWSER_ID"
   write_launcher "$bin"
   local icons="$HOME/.local/share/icons/hicolor"
+  local icon="$icons/scalable/apps/$BROWSER_ID.svg"
   mkdir -p "$icons/scalable/apps" "$HOME/.local/share/applications"
-  cp "$ICON_SVG" "$icons/scalable/apps/$BROWSER_ID.svg"
-  if have rsvg-convert; then
-    local size
-    for size in 48 128 256; do
-      mkdir -p "$icons/${size}x${size}/apps"
+  cp "$ICON_SVG" "$icon"
+  local size
+  for size in 48 128 256; do
+    mkdir -p "$icons/${size}x${size}/apps"
+    if have rsvg-convert; then
       rsvg-convert -w "$size" -h "$size" "$ICON_SVG" -o "$icons/${size}x${size}/apps/$BROWSER_ID.png"
-    done
-  fi
+    elif have convert; then
+      convert -background none -density 384 "$ICON_SVG" -resize "${size}x${size}" "$icons/${size}x${size}/apps/$BROWSER_ID.png" 2>/dev/null || true
+    fi
+  done
+  # The icon is given by path: a stale icon-theme.cache in ~/.local/share/icons
+  # otherwise hides a freshly added icon name from GNOME.
   cat >"$HOME/.local/share/applications/$BROWSER_ID.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$BROWSER_NAME
 Comment=Chromium through the Sissy Censor System proxy
 Exec=$bin %U
-Icon=$BROWSER_ID
+Icon=$icon
 Terminal=false
 Categories=Network;WebBrowser;
 MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
 StartupWMClass=SissyBrowser
 EOF
   have update-desktop-database && update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
-  have gtk-update-icon-cache && gtk-update-icon-cache -q "$icons" 2>/dev/null || true
+  # -t: no index.theme in the user directory; without it the refresh fails silently.
+  have gtk-update-icon-cache && gtk-update-icon-cache -f -t -q "$icons" 2>/dev/null || true
 }
 
 install_launcher_macos() {
@@ -322,7 +382,7 @@ seed_profile() {
   local base; base=$(profile_dir)
   local dir="$base/Default"
   local bookmarks="$dir/Bookmarks" prefs="$dir/Preferences"
-  if [ -e "$base/SingletonLock" ] || [ -e "$base/SingletonSocket" ]; then
+  if profile_in_use; then
     warn "$BROWSER_NAME is running; close it and rerun to add the admin panel bookmark"
     return
   fi
@@ -398,6 +458,7 @@ install_chromium
 [ -f "$ICON_SVG" ] || die "icon missing from the checkout: $ICON_SVG"
 if [ "$OS" = Linux ]; then install_launcher_linux; else install_launcher_macos; fi
 seed_profile
+init_profile
 
 log "Installed"
 cat <<EOF

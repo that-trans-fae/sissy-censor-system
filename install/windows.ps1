@@ -130,9 +130,17 @@ function Start-Proxy {
         if ($waited -ge 120) { Die "the proxy did not write its CA to $CaPem" }
         Start-Sleep 2; $waited += 2
     }
-    try {
-        [void](Invoke-WebRequest -Uri 'http://censor.local/health' -Proxy "http://$ProxyHost`:$ProxyPort" -UseBasicParsing -TimeoutSec 15)
-    } catch { Warn "health check through the proxy failed; check 'docker compose logs' in $ScsDir\src" }
+    # The container takes a few seconds to load the models after (re)creation.
+    $waited = 0
+    while ($true) {
+        try {
+            [void](Invoke-WebRequest -Uri 'http://censor.local/health' -Proxy "http://$ProxyHost`:$ProxyPort" -UseBasicParsing -TimeoutSec 15)
+            break
+        } catch {
+            if ($waited -ge 60) { Warn "health check through the proxy failed; check 'docker compose logs' in $ScsDir\src"; break }
+            Start-Sleep 3; $waited += 3
+        }
+    }
 }
 
 # ------------------------------------------------------------------- trust

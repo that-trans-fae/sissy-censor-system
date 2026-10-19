@@ -1,12 +1,13 @@
 <#
 Sissy Censor System: dedicated browser installer for Windows.
 
-Installs Git, Docker Desktop and Chromium with winget, clones the
-repository, builds and starts the proxy, and adds a "Sissy Browser"
-shortcut to the Start menu and desktop: a separate Chromium profile that
-always goes through the proxy and trusts only its CA. Nothing system-wide
-changes: no Windows proxy, no CA in the Windows store, and your usual
-browsers are untouched. Linux and macOS: install/browser.sh.
+Installs Git, Docker Desktop, Chromium and the sqlite3 tool with winget,
+clones the repository, builds and starts the proxy, and adds a "Sissy
+Browser" shortcut to the Start menu and desktop: a separate Chromium
+profile that always goes through the proxy and trusts its CA in the
+profile's own certificate store. Nothing system-wide changes: no Windows
+proxy, no CA in the Windows store, and your usual browsers are untouched.
+Linux and macOS: install/browser.sh.
 
 Run from a normal PowerShell (winget asks for elevation when it needs it):
 
@@ -121,9 +122,17 @@ function Start-Proxy {
         if ($waited -ge 120) { Die "the proxy did not write its CA to $CaPem" }
         Start-Sleep 2; $waited += 2
     }
-    try {
-        [void](Invoke-WebRequest -Uri 'http://censor.local/health' -Proxy "http://$ProxyHost`:$ProxyPort" -UseBasicParsing -TimeoutSec 15)
-    } catch { Warn "health check through the proxy failed; check 'docker compose logs' in $ScsDir\src" }
+    # The container takes a few seconds to load the models after (re)creation.
+    $waited = 0
+    while ($true) {
+        try {
+            [void](Invoke-WebRequest -Uri 'http://censor.local/health' -Proxy "http://$ProxyHost`:$ProxyPort" -UseBasicParsing -TimeoutSec 15)
+            break
+        } catch {
+            if ($waited -ge 60) { Warn "health check through the proxy failed; check 'docker compose logs' in $ScsDir\src"; break }
+            Start-Sleep 3; $waited += 3
+        }
+    }
 }
 
 # ---------------------------------------------------------------- chromium
@@ -149,29 +158,49 @@ function Install-Chromium {
     return $exe
 }
 
-# Base64 SHA-256 of the CA's SubjectPublicKeyInfo. mitmproxy signs each site
-# certificate with the CA's own key pair, so this one hash covers every site
-# the proxy intercepts, and Chromium accepts it with --ignore-certificate-errors-spki-list.
-function Get-CaSpkiHash {
-    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CaPem)
-    $key = $cert.PublicKey
-    if ($key.PSObject.Methods.Name -contains 'ExportSubjectPublicKeyInfo') {
-        $spki = $key.ExportSubjectPublicKeyInfo()
-    } else {
-        # Windows PowerShell 5.1: build the SPKI DER by hand (RSA only).
-        if ($key.Oid.Value -ne '1.2.840.113549.1.1.1') { Die "unexpected CA key type $($key.Oid.FriendlyName); run this from PowerShell 7" }
-        function Der-Length([int]$n) {
-            if ($n -lt 128) { return ,[byte]$n }
-            if ($n -lt 256) { return [byte[]](0x81, $n) }
-            return [byte[]](0x82, ($n -shr 8), ($n -band 0xff))
-        }
-        function Der-Tlv([byte]$tag, [byte[]]$content) { return [byte[]]@($tag) + (Der-Length $content.Length) + $content }
-        $alg  = Der-Tlv 0x30 ([byte[]](0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00))
-        $bits = Der-Tlv 0x03 ([byte[]]@(0) + $key.EncodedKeyValue.RawData)
-        $spki = Der-Tlv 0x30 ($alg + $bits)
+# ------------------------------------------------------------------- trust
+# The proxy CA goes into the profile's own certificate store (the "Installed
+# by you" list in chrome://certificate-manager): a SQLite file Chromium
+# creates on first start, written here with the sqlite3 command-line tool.
+# No flag and no system-wide trust is needed.
+function Find-Sqlite {
+    Refresh-Path
+    $cmd = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $pkgs = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    if (Test-Path $pkgs) {
+        $hit = Get-ChildItem -Path $pkgs -Recurse -Filter sqlite3.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
     }
-    $sha = [System.Security.Cryptography.SHA256]::Create().ComputeHash([byte[]]$spki)
-    return [Convert]::ToBase64String($sha)
+    return $null
+}
+
+function Test-ProfileInUse {
+    $lock = Join-Path $ProfileDir 'lockfile'
+    if (-not (Test-Path $lock)) { return $false }
+    try { [System.IO.File]::Open($lock, 'Open', 'ReadWrite', 'None').Dispose(); return $false } catch { return $true }
+}
+
+function Trust-CaInProfile($chromium) {
+    $sqlite = Find-Sqlite
+    if (-not $sqlite) { Log 'Installing the SQLite command-line tool'; Winget-Install 'SQLite.SQLite'; $sqlite = Find-Sqlite }
+    if (-not $sqlite) { Die 'could not find sqlite3.exe after installing SQLite.SQLite' }
+    $db = Join-Path $ProfileDir 'Default\ServerCertificate'
+    if (-not (Test-Path $db)) {
+        if (Test-ProfileInUse) { Warn "$BrowserName is running; close it and rerun to trust the proxy CA"; return }
+        Log 'Initialising the profile'
+        Start-Process -Wait -WindowStyle Hidden -FilePath $chromium -ArgumentList @(
+            "--user-data-dir=`"$ProfileDir`"", '--headless=new', '--disable-gpu', '--no-first-run', '--dump-dom', 'about:blank')
+    }
+    if (-not (Test-Path $db)) { Die "Chromium did not create $db (Chromium 134 or newer is needed)" }
+    Log "Trusting the proxy CA in the $BrowserName profile"
+    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CaPem)
+    $der = $cert.RawData
+    $hash = ([System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($der))) -replace '-'
+    $derHex = ([System.BitConverter]::ToString($der)) -replace '-'
+    # trust_settings is a CertificateMetadata protobuf: trust { trust_type: TRUSTED }
+    & $sqlite $db "INSERT OR IGNORE INTO certificates VALUES ('$hash', X'$derHex', X'0A020803');"
+    if ($LASTEXITCODE -ne 0) { Die 'sqlite3 could not write the certificate into the profile' }
 }
 
 # ------------------------------------------------------------------- icon
@@ -229,13 +258,12 @@ function Install-Shortcuts($chromium) {
     Log "Adding the $BrowserName shortcuts"
     New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
     Write-Icon $IconPath
-    $spki = Get-CaSpkiHash
     $shell = New-Object -ComObject WScript.Shell
     foreach ($path in $Shortcuts) {
         $lnk = $shell.CreateShortcut($path)
         $lnk.TargetPath = $chromium
         $lnk.Arguments = "--user-data-dir=`"$ProfileDir`" --proxy-server=$ProxyHost`:$ProxyPort " +
-                         "--ignore-certificate-errors-spki-list=$spki --no-first-run --no-default-browser-check"
+                         "--no-first-run --no-default-browser-check"
         $lnk.WorkingDirectory = Split-Path $chromium
         $lnk.IconLocation = "$IconPath,0"
         $lnk.Description = 'Chromium through the Sissy Censor System proxy'
@@ -314,6 +342,7 @@ Start-Proxy
 $chromium = Install-Chromium
 Install-Shortcuts $chromium
 Seed-Profile
+Trust-CaInProfile $chromium
 
 Log 'Installed'
 Write-Host @"
@@ -323,6 +352,6 @@ Write-Host @"
     Admin panel:  http://localhost:8082/admin
     Checkout:     $ScsDir
     Only $BrowserName goes through the proxy; your other browsers are unchanged.
-    The shortcut bakes in the CA's key hash: rerun this installer if you ever
+    The CA is trusted inside the profile: rerun this installer if you ever
     delete $ScsDir\src\mitmproxy and the proxy makes a new CA.
 "@

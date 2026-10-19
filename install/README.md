@@ -50,9 +50,14 @@ with empty fields.
 Installs Chromium (snap or distribution package on Linux, Homebrew cask on
 macOS, winget on Windows) and adds a **Sissy Browser** launcher with its
 own icon (`docs/brand/browser-icon.svg`). It opens a separate profile with
-`--proxy-server=127.0.0.1:8080` and trusts the proxy's CA through
-`--ignore-certificate-errors-spki-list`, so nothing is added to the system
-trust store and your other browsers are untouched. The profile starts with
+`--proxy-server=127.0.0.1:8080` and trusts the proxy's CA in that profile's
+own certificate store (the "Installed by you" list in
+`chrome://certificate-manager`, which needs Chromium 134 or newer), so
+nothing is added to the system trust store, no "unsupported command-line
+flag" bar appears, and your other browsers are untouched. On Linux and
+macOS the launcher writes the CA into the store at every start, so a
+regenerated CA needs no reinstall; on Windows the installer writes it with
+the sqlite3 tool, so rerun the installer after a CA change. The profile starts with
 the bookmark bar shown and the admin panel (`http://localhost:8082/admin`)
 on it; rerunning the installer adds the bookmark to an existing profile if
 it is missing (close the browser first). On Linux and macOS the launcher

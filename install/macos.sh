@@ -108,8 +108,15 @@ start_proxy() {
     [ "$waited" -lt 120 ] || die "the proxy did not write its CA to $CA_PEM"
     sleep 2; waited=$((waited + 2))
   done
-  curl -fsS -x "http://$PROXY_HOST:$PROXY_PORT" http://censor.local/health >/dev/null \
-    || warn "health check through the proxy failed; check 'docker compose logs' in $SCS_DIR/src"
+  # The container takes a few seconds to load the models after (re)creation.
+  waited=0
+  until curl -fsS -x "http://$PROXY_HOST:$PROXY_PORT" http://censor.local/health >/dev/null 2>&1; do
+    if [ "$waited" -ge 60 ]; then
+      warn "health check through the proxy failed; check 'docker compose logs' in $SCS_DIR/src"
+      break
+    fi
+    sleep 3; waited=$((waited + 3))
+  done
 }
 
 # ------------------------------------------------------------------- trust
