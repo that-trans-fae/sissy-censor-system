@@ -108,6 +108,19 @@ class Censor:
         result.elapsed_ms = (time.perf_counter() - start) * 1000
         return result
 
+    def precheck(self, data: bytes, mime: str | None = None) -> ScanResult | None:
+        """censor_bytes' result for an image that needs no detection (too
+        small, not a supported image, or already cached), from its header and
+        hash alone; None if it needs the full scan. Callers run this before
+        queueing for a detection worker, so such images never wait behind
+        slow ones (animated GIFs take seconds each)."""
+        start = time.perf_counter()
+        quick = self._quick(data, mime)
+        if not isinstance(quick, ScanResult):
+            return None
+        quick.elapsed_ms = (time.perf_counter() - start) * 1000
+        return quick
+
     def fail_closed(self, data: bytes, reason: str, first_frame_only: bool = False) -> ScanResult:
         """Censor the whole image (every frame). Used when detection fails.
         With first_frame_only, an animation becomes its first frame, fully
@@ -126,20 +139,38 @@ class Censor:
 
     # -- internals --------------------------------------------------------
 
-    def _scan(self, data: bytes, mime: str | None) -> ScanResult:
+    def _quick(self, data: bytes, mime: str | None) -> ScanResult | tuple[str, str | None]:
+        """The checks that need no decoding: a result if they settle it, else
+        (format, cache key). Reads only the header; the frame count can mean
+        walking a whole GIF, so it's left to _scan. Oversized images (they
+        fail closed, which is never cached) aren't hashed."""
         icfg = self.cfg.images
         if len(data) < icfg.size_floor_bytes:
             return ScanResult(data, "skipped", "below size floor")
-
         try:
             with Image.open(io.BytesIO(data)) as probe:
-                fmt, size, n_frames = probe.format, probe.size, getattr(probe, "n_frames", 1)
+                fmt, size = probe.format, probe.size
         except Exception:
             return ScanResult(data, "skipped", f"not a decodable image ({mime})")
         if fmt not in SUPPORTED_FORMATS:
             return ScanResult(data, "skipped", f"unsupported format {fmt}", fmt)
         if min(size) < icfg.min_side_px:
             return ScanResult(data, "skipped", "below min_side_px", fmt)
+        if len(data) > icfg.max_bytes:
+            return fmt, None
+        key = hashlib.sha256(data).hexdigest()
+        if (hit := self._cache_get(key)) is not None:
+            return hit
+        return fmt, key
+
+    def _scan(self, data: bytes, mime: str | None) -> ScanResult:
+        icfg = self.cfg.images
+        quick = self._quick(data, mime)
+        if isinstance(quick, ScanResult):
+            return quick
+        fmt, key = quick
+        with Image.open(io.BytesIO(data)) as probe:
+            size, n_frames = probe.size, getattr(probe, "n_frames", 1)
         # Too big to scan: deliver the first frame fully censored, without
         # decoding the rest.
         decoded_bytes = size[0] * size[1] * 4 * n_frames
@@ -150,10 +181,6 @@ class Censor:
                                     first_frame_only=True)
         if n_frames > icfg.max_frames:
             return self.fail_closed(data, f"{n_frames} frames exceeds max_frames", first_frame_only=True)
-
-        key = hashlib.sha256(data).hexdigest()
-        if (hit := self._cache_get(key)) is not None:
-            return hit
 
         decoded = _decode(data)
         frame_decisions = self._detect_frames(decoded.frames)

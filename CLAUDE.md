@@ -24,7 +24,7 @@ src/censor_proxy/datauri.py    base64 data-URI images in HTML/CSS/JSON bodies
 src/censor_proxy/video.py      video jobs: ffmpeg decode -> detect -> blur -> fMP4
 src/censor_proxy/server.py     internal HTTP server behind https://censor.local
 src/censor_proxy/inject.py     HTML script injection and CSP extension
-src/censor_proxy/static/inject.js  the injected video control (branding at the top)
+src/censor_proxy/static/inject.js  the injected video control and image placeholders (branding at the top)
 src/censor_proxy/config.py     dataclasses + loader (defaults.yaml merged with user file)
 src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
@@ -70,7 +70,9 @@ stdin, or put them under `src/` and delete them afterwards.
 ## How detection works
 
 - `Censor.censor_bytes()` is the only path into detection; every caller
-  (image responses now, data URIs next) goes through it.
+  (image responses now, data URIs next) goes through it. The addon first
+  calls `Censor.precheck()` off the worker pool, which settles images that
+  need no detection (small, unsupported, cached) so they don't queue.
 - `decide()` in `detection.py` holds the whole selection rule. Female labels
   use context-dependent thresholds; unsexed labels are attributed by
   proximity to female or male context. `docs/decisions.md` explains each
@@ -93,6 +95,12 @@ ffmpeg in `video.py` and stream fragmented MP4 back while they run. Job
 requests are only accepted from origins matching `video.hosts`, and only
 for public addresses (`video.allow_private_sources` relaxes that). See
 `docs/video-design.md`.
+
+The same script draws image placeholders (`images.placeholders`): an
+`<img>` still loading a moment after it comes into view gets a "Censoring"
+card until it loads. It is injected while either feature is on, and gates
+its video hooks on `video.enabled`. The pieces are filled into the script by
+`InternalServer.inject_js()` (`__NAME__` markers).
 
 ## Working conventions
 

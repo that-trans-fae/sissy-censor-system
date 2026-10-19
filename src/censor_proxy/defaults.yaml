@@ -129,6 +129,21 @@ images:
   max_detect_frames: 48
   # Animations with more frames than this get the same first-frame treatment.
   max_frames: 600
+  # Pages get a placeholder card over images still loading
+  # placeholder_delay_ms after they come into view (usually waiting their
+  # turn in the censor), removed when the image arrives or fails. Images
+  # with a side under placeholder_min_px on the page get none. Drawn by the
+  # injected script, so only on pages matching video.hosts; a slow network
+  # shows it too, since the page can't tell the two apart.
+  placeholders: true
+  placeholder_delay_ms: 400
+  placeholder_min_px: 48
+  # An image the page gives no size takes no room until it loads. Unless it
+  # sits alone in a sized box (whose box the card then covers), it is held
+  # open at this many pixels on each unsized axis (capped at its container's
+  # width) while it waits, and let go when it loads. 0 leaves such images
+  # without a placeholder.
+  placeholder_reserve_px: 160
 
 data_uris:
   # Scan text bodies for base64 data-URI images (data:image/...;base64,...)

@@ -99,6 +99,25 @@ starts after a few seconds of video are ready. Videos the control can't find
 a source for stay covered. The control's text and colours are at the top of
 `censor_proxy/static/inject.js`; its name is `video.brand_name`.
 
+## Image placeholders
+
+The proxy holds each image until it is censored, so on image-heavy pages
+images queue behind each other. The same injected script covers any image
+still loading 400 ms after it comes into view (`images.placeholder_delay_ms`)
+with a "Censoring" card until it arrives. Images smaller than 48 px on the
+page get none (`images.placeholder_min_px`). Turn it off with
+`images.placeholders: false`. The page can't tell a censor queue from a slow
+network, so slow images show the card too.
+
+This covers every `<img>`, GIFs included (animated GIFs are the slowest to
+censor, often 10-20 s). An image the page gives no size takes no room while
+it loads; the card then covers the sized box it sits alone in, or else the
+image is held open at 160 px (`images.placeholder_reserve_px`) until it
+arrives. Not covered: CSS background images (the page can't see which are
+still loading), images opened directly in their own tab (there is no page to
+inject into), and "GIFs" that are really videos, which get the video cover
+instead.
+
 ## Review detections
 
 Draws every detection on each sample (red = censored, grey = passed) next to

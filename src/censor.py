@@ -1,7 +1,7 @@
 """mitmproxy addon: censor female explicit regions in image responses
 (including ones whose Content-Type doesn't say image) and in base64 data-URI
-images embedded in text bodies, and inject the video control into pages on
-allowlisted hosts.
+images embedded in text bodies, and inject the video control and image
+placeholders into pages on allowlisted hosts.
 
 Run with:  mitmdump -s censor.py
 """
@@ -98,7 +98,7 @@ class CensorAddon:
         elif self._is_sniff_candidate(flow):
             flow.metadata["censor_sniff"] = True
             flow.response.stream = False
-        elif self._is_data_uri_text(flow) or self._is_video_page(flow):
+        elif self._is_data_uri_text(flow) or self._is_inject_page(flow):
             length = flow.response.headers.get("Content-Length", "")
             flow.response.stream = (length.isdigit()
                                     and int(length) > self.cfg.data_uris.max_body_bytes)
@@ -117,7 +117,7 @@ class CensorAddon:
             if mime := sniff(flow.response.content or b""):
                 await self._censor_image(flow, mime, source="sniffed")
                 return
-        if self._is_video_page(flow):
+        if self._is_inject_page(flow):
             self._inject(flow)
         if self._is_data_uri_text(flow):
             await self._censor_text(flow)
@@ -176,11 +176,12 @@ class CensorAddon:
         flow.response.stream = emit
         log.info("replaced directly opened video with control page: %s", flow.request.pretty_host)
 
-    def _is_video_page(self, flow: http.HTTPFlow) -> bool:
+    def _is_inject_page(self, flow: http.HTTPFlow) -> bool:
         # Browsers say what a request is for; only documents and frames get
         # the script, never HTML fetched by a page's own code.
         dest = flow.request.headers.get("Sec-Fetch-Dest", "document")
-        return (self.cfg.video.enabled and flow.response.status_code == 200
+        return ((self.cfg.video.enabled or self.cfg.images.placeholders)
+                and flow.response.status_code == 200
                 and _mime(flow) == "text/html" and dest in ("document", "iframe", "frame")
                 and any(p.search(flow.request.pretty_host) for p in self.video_hosts))
 
@@ -201,8 +202,12 @@ class CensorAddon:
         loop = asyncio.get_running_loop()
         self.in_flight += 1
         try:
-            result = await self._run_timed(self.cfg.censor.timeout_seconds,
-                                           self.censor.censor_bytes, data, mime)
+            # Images that need no detection (small, cached) are settled off
+            # the worker pool, so they never queue behind slow ones.
+            result = await loop.run_in_executor(None, self.censor.precheck, data, mime)
+            if result is None:
+                result = await self._run_timed(self.cfg.censor.timeout_seconds,
+                                               self.censor.censor_bytes, data, mime)
         except Exception as e:
             reason = _failure_reason(e)
             log.warning("detection failed for %s: %s", flow.request.pretty_host, reason)
@@ -227,12 +232,18 @@ class CensorAddon:
         fail_closed = self.cfg.censor.fail_closed
         self.in_flight += 1
         try:
-            # Each image gets the per-image budget; one slow image shouldn't
-            # cost the rest of the page.
-            result = await self._run_timed(
-                self.cfg.censor.timeout_seconds * len(matches),
-                lambda: datauri.censor_data_uris(body, self.censor, fail_closed=fail_closed,
-                                                 matches=matches))
+            # A body whose images all need no detection (tiny placeholders,
+            # cached) skips the worker pool: the page itself shouldn't wait
+            # behind slow images.
+            result = await loop.run_in_executor(None, lambda: datauri.censor_data_uris(
+                body, self.censor, fail_closed=fail_closed, matches=matches, precheck=True))
+            if result is None:
+                # Each image gets the per-image budget; one slow image
+                # shouldn't cost the rest of the page.
+                result = await self._run_timed(
+                    self.cfg.censor.timeout_seconds * len(matches),
+                    lambda: datauri.censor_data_uris(body, self.censor, fail_closed=fail_closed,
+                                                     matches=matches))
         except Exception as e:
             reason = _failure_reason(e)
             log.warning("data-URI detection failed for %s: %s", flow.request.pretty_host, reason)

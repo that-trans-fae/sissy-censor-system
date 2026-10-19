@@ -27,6 +27,8 @@ def test_lists_replace_wholesale(make_config):
     "censor: {style: sparkles}\n",
     "logging: {level: verbose}\n",
     "proxy: {passthrough_hosts: ['(']}\n",
+    "images: {placeholder_delay_ms: -1}\n",
+    "images: {placeholder_reserve_px: -1}\n",
 ])
 def test_bad_config_rejected(make_config, text):
     with pytest.raises(ConfigError):

@@ -159,6 +159,9 @@ def test_server_health_and_inject_js(server):
     assert headers["Content-Type"].startswith("text/javascript")
     assert b'"https://censor.local"' in body and b"__CENSOR_ORIGIN__" not in body
     assert b'"Sissy Censor System"' in body
+    assert b'"__' not in body  # every template value filled in
+    assert b'"true" === "true";                  // video.enabled' in body
+    assert b'Number("400")' in body  # images.placeholder_delay_ms
 
 
 def test_server_streams_running_job_then_serves_ranges(server, tmp_path):

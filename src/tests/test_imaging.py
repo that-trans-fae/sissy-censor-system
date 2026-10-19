@@ -142,6 +142,20 @@ def test_cache_hit(make_config):
     assert fake.calls == 1 and second.cached and second.data == first.data
 
 
+def test_precheck_settles_what_needs_no_detection(make_config):
+    cfg = make_config("images: {size_floor_bytes: 2000, min_side_px: 100}\n")
+    fake = FakeDetector([det("FEMALE_BREAST_EXPOSED", box=BOX)])
+    censor = Censor(cfg, fake)
+    assert censor.precheck(b"x" * 100).reason == "below size floor"
+    assert censor.precheck(encode(noise(80, 60), "PNG")).reason == "below min_side_px"
+    assert censor.precheck(b"not an image" * 200).action == "skipped"
+    original = encode(noise(), "PNG")
+    assert censor.precheck(original) is None  # needs the model
+    first = censor.censor_bytes(original)
+    hit = censor.precheck(original)
+    assert hit.cached and hit.data == first.data and fake.calls == 1
+
+
 @pytest.mark.parametrize("limit", ["max_bytes: 1000", "max_decoded_bytes: 1000", "max_frames: 3"])
 def test_oversized_animation_fails_closed_to_first_frame(make_config, limit):
     cfg = make_config(f"images: {{size_floor_bytes: 0, min_side_px: 1, {limit}}}\n")

@@ -76,6 +76,10 @@ class ImagesConfig:
     frame_step: int
     max_detect_frames: int
     max_frames: int
+    placeholders: bool
+    placeholder_delay_ms: int
+    placeholder_min_px: int
+    placeholder_reserve_px: int
 
 
 @dataclass(frozen=True)
@@ -221,6 +225,10 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("images.frame_step must be >= 1")
     if cfg.images.max_detect_frames < 2:
         raise ConfigError("images.max_detect_frames must be >= 2")
+    if min(cfg.images.placeholder_delay_ms, cfg.images.placeholder_min_px,
+           cfg.images.placeholder_reserve_px) < 0:
+        raise ConfigError("images.placeholder_delay_ms, placeholder_min_px and "
+                          "placeholder_reserve_px must be >= 0")
     if not 1 <= cfg.censor.quality <= 100:
         raise ConfigError("censor.quality must be between 1 and 100")
     if len(cfg.censor.fill_color) != 3:

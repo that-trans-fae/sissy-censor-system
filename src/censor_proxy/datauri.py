@@ -41,14 +41,18 @@ def find(body: bytes) -> list[re.Match]:
 
 def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
                      matches: list[re.Match] | None = None,
-                     force_reason: str | None = None, _depth: int = 0) -> DataUriResult:
+                     force_reason: str | None = None, precheck: bool = False,
+                     _depth: int = 0) -> DataUriResult | None:
     """Run every data-URI image in `body` through censor_bytes and splice the
     results back in.
 
     A failure on one image fails that image closed (or leaves it, if
     fail_closed is off) without affecting the rest. With `force_reason`, every
     image is failed closed without detection; the caller uses this when the
-    whole body timed out.
+    whole body timed out. With `precheck`, only Censor.precheck is used, and
+    the result is None as soon as one image needs the full scan; the caller
+    uses this to skip the detection queue for bodies whose images are all
+    tiny placeholders or cached.
     """
     if matches is None:
         matches = find(body)
@@ -66,7 +70,10 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
             if _depth >= censor.cfg.data_uris.svg_depth:
                 continue
             inner = censor_data_uris(data, censor, fail_closed=fail_closed,
-                                     force_reason=force_reason, _depth=_depth + 1)
+                                     force_reason=force_reason, precheck=precheck,
+                                     _depth=_depth + 1)
+            if inner is None:
+                return None
             results += inner.results
             if inner.changed:
                 out += [body[last:m.start(2)], _encode(inner.body, escaped)]
@@ -74,6 +81,9 @@ def censor_data_uris(body: bytes, censor: Censor, *, fail_closed: bool,
             continue
         if force_reason:
             result = censor.fail_closed(data, force_reason)
+        elif precheck:
+            if (result := censor.precheck(data, mime)) is None:
+                return None
         else:
             try:
                 result = censor.censor_bytes(data, mime)

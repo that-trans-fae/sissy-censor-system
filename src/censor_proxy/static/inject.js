@@ -1,10 +1,13 @@
-// Censor proxy video control. Injected at the top of <head> on allowlisted
-// sites, before the page's own scripts, so it can see every <video> (including
-// inside shadow roots) and the HLS/DASH manifests players fetch.
+// Censor proxy page script. Injected at the top of <head> on allowlisted
+// sites, before the page's own scripts, so it can see every <video> and <img>
+// (including inside shadow roots) and the HLS/DASH manifests players fetch.
 //
-// Every video is paused and covered. "Play censored" asks the proxy for a
-// censored copy and plays it in our own <video> laid over the original.
+// Video: every video is paused and covered. "Play censored" asks the proxy
+// for a censored copy and plays it in our own <video> laid over the original.
 // Videos whose source can't be found stay covered.
+//
+// Images: an image still loading a moment after it comes into view (most
+// often waiting its turn in the censor) gets a placeholder until it arrives.
 (() => {
   "use strict";
   if (window.__censorProxy) return;
@@ -12,6 +15,12 @@
   const ORIGIN = "__CENSOR_ORIGIN__";
   const DEBUG = "__DEBUG__" === "true";
   const MAX_HEIGHT = Number("__MAX_HEIGHT__") || 720;  // video.max_height
+  const VIDEO = "__VIDEO__" === "true";                  // video.enabled
+  const PLACEHOLDERS = "__PLACEHOLDERS__" === "true";    // images.placeholders
+  const PLACEHOLDER_MS = Number("__PLACEHOLDER_MS__");   // images.placeholder_delay_ms
+  const PLACEHOLDER_MIN_PX = Number("__PLACEHOLDER_MIN_PX__");  // images.placeholder_min_px
+  const RESERVE_PX = Number("__PLACEHOLDER_RESERVE_PX__");      // images.placeholder_reserve_px
+  if (!VIDEO && !PLACEHOLDERS) return;
 
   // Debug mode reports what the script sees to the proxy log.
   function report(event, data) {
@@ -34,11 +43,13 @@
     strings: {
       idle: "This video is paused and covered.",
       play: "Play censored",
+      queued: "Waiting for another video…",
       preparing: "Censoring video…",
       unavailable: "This video can't be censored",
       unavailableDetail: "It stays covered. The page didn't expose a source the proxy can fetch.",
       failed: "Couldn't censor this video",
       retry: "Try again",
+      image: "Censoring",
     },
     // Icons as [viewBox, svg attributes, [tag, attributes]...], built with
     // DOM calls (innerHTML is blocked on Trusted Types pages). Coloured by
@@ -123,6 +134,27 @@
         button { font-size: 13px; padding: 11px 16px 11px 13px; }
       }
     `,
+    // The image placeholder: the mark, its tiles pulsing corner to corner,
+    // over the label. Small images keep just the mark.
+    imageCss: `
+      :host { all: initial; }
+      .ph {
+        position: absolute; inset: 0; box-sizing: border-box; overflow: hidden;
+        container-type: size;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 10px; background: #16121A; color: #FF6FAE;
+      }
+      svg { display: block; width: clamp(14px, 22cqmin, 40px); height: auto; }
+      rect { animation: censor-tile 1.4s ease-in-out infinite; }
+      ${MOSAIC.map((_, i) => `rect:nth-child(${i + 1}) { animation-delay: ${(i % 3 + Math.floor(i / 3)) * 0.14}s; }`).join("\n      ")}
+      @keyframes censor-tile { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { rect { animation: none; } }
+      span {
+        font: 500 11px/1 "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+        letter-spacing: .14em; text-transform: uppercase; color: #A898A6;
+      }
+      @container (max-width: 120px) or (max-height: 90px) { span { display: none; } }
+    `,
   };
   // ---------------------------------------------------------------------
 
@@ -142,30 +174,34 @@
     } catch (_) { /* not a URL */ }
   }
   const origFetch = window.fetch;
-  if (origFetch) {
+  if (VIDEO && origFetch) {
     window.fetch = function (input, init) {
       note(typeof input === "string" ? input : input && input.url);
       return origFetch.apply(this, arguments);
     };
   }
   const origOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function (method, url) {
-    note(url);
-    return origOpen.apply(this, arguments);
-  };
+  if (VIDEO) {
+    XMLHttpRequest.prototype.open = function (method, url) {
+      note(url);
+      return origOpen.apply(this, arguments);
+    };
+  }
 
   // ---- Block playback until censored ------------------------------------
   const origPlay = HTMLMediaElement.prototype.play;
-  HTMLMediaElement.prototype.play = function () {
-    if (this instanceof HTMLVideoElement && !ours.has(this)) {
-      guard(this);
-      this.pause();
-      return Promise.reject(new DOMException("Paused until censored", "NotAllowedError"));
-    }
-    return origPlay.apply(this, arguments);
-  };
+  if (VIDEO) {
+    HTMLMediaElement.prototype.play = function () {
+      if (this instanceof HTMLVideoElement && !ours.has(this)) {
+        guard(this);
+        this.pause();
+        return Promise.reject(new DOMException("Paused until censored", "NotAllowedError"));
+      }
+      return origPlay.apply(this, arguments);
+    };
+  }
 
-  // ---- Find videos, including inside shadow roots -----------------------
+  // ---- Find videos and images, including inside shadow roots ------------
   const origAttachShadow = Element.prototype.attachShadow;
   Element.prototype.attachShadow = function () {
     const root = origAttachShadow.apply(this, arguments);
@@ -173,16 +209,27 @@
     return root;
   };
 
+  const SELECTOR = [VIDEO && "video", PLACEHOLDERS && "img"].filter(Boolean).join(", ");
+
+  function found(node) {
+    if (VIDEO && node instanceof HTMLVideoElement) guard(node);
+    else if (PLACEHOLDERS && node instanceof HTMLImageElement) trackImage(node);
+  }
+
   function scan(node) {
-    if (node instanceof HTMLVideoElement) guard(node);
-    else if (node.querySelectorAll) node.querySelectorAll("video").forEach(guard);
+    found(node);
+    if (node.querySelectorAll) node.querySelectorAll(SELECTOR).forEach(found);
   }
 
   function watch(root) {
     scan(root);
     new MutationObserver((records) => {
-      for (const r of records) r.addedNodes.forEach(scan);
-    }).observe(root, { childList: true, subtree: true });
+      for (const r of records) {
+        if (r.type === "attributes") found(r.target);  // an image given a new source
+        else r.addedNodes.forEach(scan);
+      }
+    }).observe(root, { childList: true, subtree: true,
+                       ...(PLACEHOLDERS && { attributes: true, attributeFilter: ["src", "srcset"] }) });
   }
 
   // ---- Cards -------------------------------------------------------------
@@ -356,6 +403,227 @@
       }
     }
     requestAnimationFrame(position);
+  }
+
+  // ---- Image placeholders ----------------------------------------------
+  // The proxy holds each image until it is censored, and on image-heavy
+  // pages they queue for the workers, leaving blank boxes. An image still
+  // loading PLACEHOLDER_MS after it came into view gets a card until it
+  // loads or fails. Unlike video cards these stack with the image (its own
+  // z-index, so a sticky header still covers them), are clipped by whatever
+  // scrolling or clipping containers clip the image, and let clicks through
+  // to the image and any link around it.
+  const loading = new Map();        // <img> still loading -> placeholder state
+  const inView = new Set();         // the ones near the viewport
+  const listening = new WeakSet();
+  const IMAGE_HOST_CSS = "position:absolute;display:none;margin:0;padding:0;" +
+    "border:0;pointer-events:none;contain:strict;overflow:hidden;right:auto;bottom:auto;" +
+    "min-width:0;min-height:0;max-width:none;max-height:none;transform:none;float:none;" +
+    "opacity:1;visibility:visible;";
+
+  const viewport = PLACEHOLDERS && new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const state = loading.get(e.target);
+      if (!state) continue;
+      if (e.isIntersecting) {
+        inView.add(e.target);
+        state.since = performance.now();  // lazy images only start loading now
+      } else {
+        inView.delete(e.target);
+        hidePlaceholder(state);
+      }
+    }
+    startPlacing();
+  }, { rootMargin: "100px" });
+
+  function trackImage(img) {
+    if (!listening.has(img)) {
+      listening.add(img);
+      img.addEventListener("load", () => untrackImage(img));
+      img.addEventListener("error", () => untrackImage(img));
+    }
+    if (img.complete) return untrackImage(img);
+    const state = loading.get(img);
+    if (state) state.since = performance.now();  // a new source starts the wait again
+    else loading.set(img, { since: performance.now(), host: null, shown: false, left: 0, top: 0 });
+    viewport.observe(img);
+  }
+
+  function untrackImage(img) {
+    const state = loading.get(img);
+    if (!state) return;
+    if (state.host) state.host.remove();
+    if (state.reserved) {
+      for (const [prop, value, priority] of state.reserved) {
+        if (value) img.style.setProperty(prop, value, priority);
+        else img.style.removeProperty(prop);
+      }
+      if (!state.hadStyle && !img.getAttribute("style")) img.removeAttribute("style");
+    }
+    loading.delete(img);
+    inView.delete(img);
+    viewport.unobserve(img);
+  }
+
+  function hidePlaceholder(state) {
+    if (!state.shown) return;
+    state.shown = false;
+    state.host.style.setProperty("display", "none", "important");
+  }
+
+  function makeImageHost() {
+    const host = document.createElement("censor-proxy-placeholder");
+    host.style.cssText = IMAGE_HOST_CSS.replace(/;/g, " !important;");
+    host.setAttribute("aria-hidden", "true");
+    const root = origAttachShadow.call(host, { mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = BRAND.imageCss;
+    const card = el("div", "ph");
+    card.append(icon("mark"), el("span", "", BRAND.strings.image));
+    root.append(style, card);
+    return host;
+  }
+
+  let placing = false;
+  function startPlacing() {
+    if (!placing && inView.size) {
+      placing = true;
+      requestAnimationFrame(placeImages);
+    }
+  }
+
+  // Ancestors that clip the image, as [element, clips x, clips y]. An
+  // absolutely positioned card escapes any that aren't also its containing
+  // block, so it is clipped to them by hand. <html> and <body> hand their
+  // overflow to the viewport and are left out.
+  function clippers(img) {
+    const list = [];
+    let node = img.parentElement || img.getRootNode().host;
+    while (node && node !== document.body && node !== document.documentElement) {
+      const cs = getComputedStyle(node);
+      const x = cs.overflowX !== "visible", y = cs.overflowY !== "visible";
+      if (x || y) list.push([node, x, y]);
+      node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null;
+    }
+    return list;
+  }
+
+  // The card's clip-path: the image's box cut down to the inside of each
+  // clipping ancestor. null when nothing of it is visible.
+  function clipPath(r, clips) {
+    let x0 = r.left, y0 = r.top, x1 = r.right, y1 = r.bottom;
+    for (const [node, cx, cy] of clips) {
+      const b = node.getBoundingClientRect();
+      const left = b.left + node.clientLeft, top = b.top + node.clientTop;
+      if (cx) { x0 = Math.max(x0, left); x1 = Math.min(x1, left + node.clientWidth); }
+      if (cy) { y0 = Math.max(y0, top); y1 = Math.min(y1, top + node.clientHeight); }
+    }
+    if (x1 <= x0 || y1 <= y0) return null;
+    const px = (v) => Math.max(0, Math.round(v)) + "px";
+    return `inset(${px(y0 - r.top)} ${px(r.right - x1)} ${px(r.bottom - y1)} ${px(x0 - r.left)})`;
+  }
+
+  // An image with no size set takes no room until it loads (pasted GIFs on
+  // forums, comment threads). If it sits alone in a sized box, such as a
+  // thumbnail frame, the card covers that box.
+  function wrapperRect(img) {
+    let node = img;
+    for (let depth = 0; depth < 3; depth++) {
+      const parent = node.parentElement;
+      if (!parent || parent === document.body || parent.textContent.trim() ||
+          [...parent.children].some((c) => c !== node && c.localName !== "source" &&
+                                           c.localName !== "censor-proxy-placeholder")) return null;
+      const r = parent.getBoundingClientRect();
+      if (r.width >= PLACEHOLDER_MIN_PX && r.height >= PLACEHOLDER_MIN_PX) return r;
+      node = parent;
+    }
+    return null;
+  }
+
+  // Otherwise the image is held open at RESERVE_PX on each axis the page
+  // left unsized, until it loads. Images sized by attribute or inline style
+  // (tracking pixels, deliberately hidden images) are left alone.
+  function reservable(img, r) {
+    if (!RESERVE_PX || img.naturalWidth || getComputedStyle(img).visibility !== "visible") return null;
+    const w = r.width === 0 && !img.hasAttribute("width") && !img.style.width;
+    const h = r.height === 0 && !img.hasAttribute("height") && !img.style.height;
+    return (w || h) && (w || r.width >= PLACEHOLDER_MIN_PX) && (h || r.height >= PLACEHOLDER_MIN_PX)
+      ? { w, h } : null;
+  }
+
+  function reserve(img, state, axes) {
+    const s = img.style;
+    state.hadStyle = img.hasAttribute("style");
+    state.reserved =["min-width", "min-height"].map((p) =>
+      [p, s.getPropertyValue(p), s.getPropertyPriority(p)]);
+    // Width is capped at the container's; a percentage height would resolve
+    // to nothing in an auto-height container.
+    if (axes.w) s.setProperty("min-width", `min(${RESERVE_PX}px, 100%)`, "important");
+    if (axes.h) s.setProperty("min-height", RESERVE_PX + "px", "important");
+  }
+
+  // Every frame: measure everything first, then move, so a page full of
+  // cards costs one layout. A card is moved by however far it sits from its
+  // image, which works whatever its containing block is.
+  function placeImages() {
+    const now = performance.now();
+    const moves = [];
+    const reserves = [];
+    for (const img of inView) {
+      const state = loading.get(img);
+      if (!img.isConnected || img.complete) {
+        untrackImage(img);
+        continue;
+      }
+      if (now - state.since < PLACEHOLDER_MS) continue;
+      let r = img.getBoundingClientRect();
+      if (!r.width || !r.height) {
+        const box = wrapperRect(img);
+        const axes = !box && !state.reserved && reservable(img, r);
+        if (box) r = box;
+        else if (axes) reserves.push([img, state, axes]);  // a card next frame, once it has room
+      }
+      const attached = state.shown && state.host.previousSibling === img;
+      if (!attached) state.clips = clippers(img);  // looked up again whenever it's (re)placed
+      const clip = clipPath(r, state.clips);
+      if (r.width < PLACEHOLDER_MIN_PX || r.height < PLACEHOLDER_MIN_PX || !clip) {
+        hidePlaceholder(state);
+        continue;
+      }
+      moves.push([img, state, r, clip, attached ? state.host.getBoundingClientRect() : null]);
+    }
+    for (const [img, state, axes] of reserves) reserve(img, state, axes);
+    for (const [img, state, r, clip, h] of moves) {
+      const host = state.host = state.host || makeImageHost();
+      const s = host.style;
+      if (clip !== state.clip) s.setProperty("clip-path", state.clip = clip, "important");
+      if (!h) {
+        // New, or the page moved things around: place it at 0,0 and measure
+        // once to find the offset.
+        if (host.previousSibling !== img) img.after(host);
+        const cs = getComputedStyle(img);
+        s.setProperty("border-radius", cs.borderRadius, "important");
+        s.setProperty("z-index", cs.zIndex, "important");
+        s.setProperty("display", "block", "important");
+        s.setProperty("left", "0px", "important");
+        s.setProperty("top", "0px", "important");
+        const origin = host.getBoundingClientRect();
+        state.left = r.left - origin.left;
+        state.top = r.top - origin.top;
+        state.shown = true;
+      } else if (Math.abs(h.left - r.left) > 0.5 || Math.abs(h.top - r.top) > 0.5) {
+        state.left += r.left - h.left;
+        state.top += r.top - h.top;
+      } else if (Math.abs(h.width - r.width) <= 0.5 && Math.abs(h.height - r.height) <= 0.5) {
+        continue;  // already in place
+      }
+      s.setProperty("left", state.left + "px", "important");
+      s.setProperty("top", state.top + "px", "important");
+      s.setProperty("width", r.width + "px", "important");
+      s.setProperty("height", r.height + "px", "important");
+    }
+    if (inView.size) requestAnimationFrame(placeImages);
+    else placing = false;
   }
 
   // ---- Source discovery ------------------------------------------------
