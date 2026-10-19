@@ -94,9 +94,18 @@ Last updated Oct 19, 2026.
   clone, build, with `SCS_UNINSTALL=1` to reverse) that set up a dedicated "Sissy Browser" Chromium profile
   pinned to the proxy with its own icon, the admin panel on its bookmark
   bar and the proxy CA trusted in the profile's own certificate store (no
-  flags, no system trust). Verified on Ubuntu with snap Chromium 155; macOS
-  and Windows are syntax-checked only (bash, shellcheck, PowerShell
-  parser). The system-level installers were dropped and Linux moved from
+  flags, no system trust). Verified on Ubuntu with snap Chromium 155 and
+  on Windows 11 with Docker Desktop and an existing Hibbiki Chromium 134
+  (Oct 19, 2026: that run found three Windows PowerShell 5.1 traps, fixed:
+  stderr of a silenced native command is a terminating error under
+  `$ErrorActionPreference = 'Stop'`, double quotes inside a native
+  command's argument are stripped, so Go templates can't quote, and
+  Chromium 134-136 third-party builds only create the profile certificate
+  store with `--enable-features=EnableCertManagementUIV2Write`, which the
+  launcher and shortcut now pass). macOS is syntax-checked only (bash,
+  shellcheck). Winget's `Hibbiki.Chromium` manifest 155.0.8059.85 is
+  marked `portable`, so a Windows machine with no Chromium may fail at
+  that step until the next manifest. The system-level installers were dropped and Linux moved from
   Docker Desktop to Docker Engine (Oct 19, 2026); the Engine path is
   syntax-checked only. The
   repository URL is still a placeholder
@@ -114,7 +123,8 @@ Last updated Oct 19, 2026.
   fake docker. Not yet: a real push to Docker Hub (`thattransfae/scs`) or
   an arm64 build; the systemd timer, launchd
   agent and Windows task are written but untried, and the PowerShell
-  updater is parse-checked only
+  updater is parse-checked only (its version lookup was fixed for
+  PowerShell 5.1 quoting on Oct 19, 2026, unreleased)
 
 - Video CPU use (Oct 19, 2026): the video model's threads capped
   (`video.max_threads`), one OpenCV thread per operation, and blurring and
@@ -130,7 +140,9 @@ Last updated Oct 19, 2026.
   in `.env`), and `scs-update` swaps and rolls back those files with
   `compose.yaml` (pytest against a fake docker). Not yet run on a real GPU:
   this machine runs Docker Desktop, which can't pass one through, and has no
-  NVIDIA card; the installers' GPU detection is syntax-checked only
+  NVIDIA card. The Windows installer's GPU detection passed on an NVIDIA
+  machine (Oct 19, 2026: the test encode succeeded and `COMPOSE_FILE` got
+  `compose.nvidia.yaml`), not yet watched on a video
 
 ## Not done yet
 
