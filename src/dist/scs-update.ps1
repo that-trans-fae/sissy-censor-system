@@ -151,13 +151,17 @@ function Apply($target) {
     Log "applying $target (was $previous)"
     $stage = Extract $target
     if (-not $stage) { Write-Status 'error' "Couldn't read the files out of release $($script:Available)."; return }
-    Copy-Item -Force compose.yaml .compose.yaml.previous
-    Move-Item -Force (Join-Path $stage 'compose.yaml') compose.yaml
+    # compose.yaml and the overrides .env's COMPOSE_FILE may add to it
+    # (compose.nvidia.yaml) go in together, and back.
+    Get-ChildItem -Force -File $stage -Filter 'compose*.yaml' | ForEach-Object {
+        if (Test-Path $_.Name) { Copy-Item -Force $_.Name ".$($_.Name).previous" }
+        Move-Item -Force $_.FullName (Join-Path $Dir $_.Name)
+    }
     Kv-Set $EnvFile 'SCS_IMAGE' $target
     docker compose up -d *>> $LogFile
     if ($LASTEXITCODE -eq 0 -and (Wait-Healthy)) {
         Get-ChildItem -Force $stage | ForEach-Object { Move-Item -Force $_.FullName (Join-Path $Dir $_.Name) }
-        Remove-Item -Recurse -Force $stage, .compose.yaml.previous -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $stage, .compose*.yaml.previous -ErrorAction SilentlyContinue
         if ($previous -ne $target) { Unkeep $previous }
         $bad = Kv-Get $State 'BAD'
         if ($bad -ne $target) { Unkeep $bad }
@@ -167,7 +171,9 @@ function Apply($target) {
     }
     Log "release $($script:Available) didn't become healthy; its last log lines:"
     docker compose logs --no-color --tail 40 $Service *>> $LogFile
-    Move-Item -Force .compose.yaml.previous compose.yaml
+    Get-ChildItem -Force -File -Filter '.compose*.yaml.previous' | ForEach-Object {
+        Move-Item -Force $_.FullName (Join-Path $Dir ($_.Name.Substring(1) -replace '\.previous$', ''))
+    }
     Kv-Set $EnvFile 'SCS_IMAGE' $previous
     docker compose up -d *>> $LogFile
     Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue

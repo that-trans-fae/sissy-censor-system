@@ -69,7 +69,8 @@ The proxy itself runs from `~/scs` (`%USERPROFILE%\scs`):
 | Path | What |
 | --- | --- |
 | `compose.yaml` | The service, from the image; replaced at each update |
-| `.env` | `SCS_IMAGE` (the running release, by digest), `SCS_CHANNEL`, your uid:gid, the browser profile; add `SCS_PROXY_PORT` or `SCS_ADMIN_PORT` to move the ports |
+| `compose.vaapi.yaml`, `compose.nvidia.yaml` | GPU overrides, from the image; in use when `COMPOSE_FILE` in `.env` names one |
+| `.env` | `SCS_IMAGE` (the running release, by digest), `SCS_CHANNEL`, your uid:gid, the browser profile, `COMPOSE_FILE` (with a GPU override if one is used, and `SCS_RENDER_NODE`/`SCS_RENDER_GID` for VAAPI); add `SCS_PROXY_PORT` or `SCS_ADMIN_PORT` to move the ports |
 | `config/config.yaml` | Your settings, written by the admin panel |
 | `mitmproxy/` | The CA, kept across updates |
 | `logs/` | Detection log; `update.json` is the last update result |
@@ -125,6 +126,7 @@ Both scripts read these environment variables:
 | `SCS_CHANNEL` | `$SCS_IMAGE_REPO:latest` | Tag to install and follow |
 | `SCS_DIR` | `~/scs` (`%USERPROFILE%\scs`) | Where the proxy runs from |
 | `SCS_UNINSTALL` | unset | `1` removes the launcher, its profile and the update job |
+| `SCS_GPU` | `1` | `0` leaves the GPU out of the container (see below) |
 
 Undo keeps Docker, Chromium and `~/scs`:
 
@@ -135,6 +137,13 @@ curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/
 ```powershell
 $env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
 ```
+
+On Linux and Windows the installer looks for a GPU to decode and encode
+video with: NVIDIA (on Linux, with the NVIDIA Container Toolkit
+installed), or on Linux an Intel or AMD render node. It is passed into the
+container only if a test encode works there, since compose won't start the
+proxy with a device that isn't there; rerun the installer after adding or
+removing a GPU or its driver. Without one, video uses the CPU, as on macOS.
 
 Rerunning the installer is safe: it installs the channel's current
 release straight away (without the health check that `scs-update` does)

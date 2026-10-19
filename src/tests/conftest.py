@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from censor_proxy import hwaccel  # noqa: E402
 from censor_proxy.config import load_config  # noqa: E402
 from censor_proxy.detection import Box, Detection  # noqa: E402
 
@@ -21,6 +22,14 @@ class FakeDetector:
         if callable(self.detections):
             return self.detections(bgr)
         return list(self.detections)
+
+
+@pytest.fixture(autouse=True)
+def fresh_hwaccel():
+    """hwaccel keeps its choice for the process; each test starts without one."""
+    hwaccel._chosen.clear()
+    hwaccel._disabled.clear()
+    yield
 
 
 def det(label, score=0.9, box=(10, 10, 50, 50)):

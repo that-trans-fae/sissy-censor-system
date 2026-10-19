@@ -91,6 +91,8 @@ class _Decoded:
 class Censor:
     def __init__(self, cfg: Config, detector: Detector | None = None):
         self.cfg = cfg
+        # Process-wide, so video jobs' blurs follow it too; < 0 is OpenCV's default.
+        cv2.setNumThreads(cfg.censor.opencv_threads or -1)
         self.detector = detector or Detector(cfg.model)
         self._cache: OrderedDict[str, ScanResult] = OrderedDict()
         self._cache_lock = threading.Lock()

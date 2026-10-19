@@ -197,6 +197,11 @@ censor:
   # AVIF encoder speed, 0 (slowest, smallest) to 10 (fastest). 8 re-encodes
   # a 720p image in ~60 ms.
   avif_speed: 8
+  # Threads OpenCV uses for each blur and resize, for the whole process; 0
+  # lets it use every CPU. The regions are small, so splitting them costs
+  # more than it saves (one thread cut a video job's blur CPU time by 80%
+  # at the same speed), and workers and video jobs already run in parallel.
+  opencv_threads: 1
 
 images:
   # Images smaller than this many bytes, or with a shorter side under
@@ -331,9 +336,23 @@ video:
   # Start the censored copy muted; its controls unmute it. false takes the
   # muted state of the page's own video.
   start_muted: true
-  # x264 settings for the censored copy.
+  # x264 settings for the censored copy. crf is also the quality the
+  # hardware encoders aim for (their QP), so lower is better there too.
   preset: veryfast
   crf: 23
+  # Hardware decoding and encoding: auto (use the GPU when compose passes
+  # one in and a test encode works, else software), none, vaapi (Intel and
+  # AMD) or nvenc (NVIDIA). Detection and blurring stay on the CPU. The
+  # installers pass a GPU in on Linux (and NVIDIA on Windows) when they find
+  # one; see compose.vaapi.yaml and compose.nvidia.yaml. A hardware run that
+  # fails is redone in software.
+  hwaccel: auto
+  # The VAAPI render node.
+  hwaccel_device: /dev/dri/renderD128
+  # Most onnxruntime threads the video model uses (model.threads_per_worker
+  # otherwise). The small 320n model gets slower past ~8: on a 16-CPU
+  # machine, 16 threads took 2.6x as long as 8 and 4x the CPU.
+  max_threads: 8
   # Seconds of censored video to have ready before playback starts.
   ready_seconds: 3
   # Length of the segments the censored copy is cut into. The player can

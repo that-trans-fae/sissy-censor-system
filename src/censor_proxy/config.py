@@ -16,6 +16,8 @@ DEFAULTS_PATH = Path(__file__).with_name("defaults.yaml")
 CONFIG_ENV = "CENSOR_CONFIG"
 
 CENSOR_STYLES = ("gaussian", "pixelate", "solid")
+# video.hwaccel values (hwaccel.py).
+HWACCEL_CHOICES = ("auto", "none", "vaapi", "nvenc")
 CUSTOM_PRESET = "custom"
 # model.resources value that uses model.workers and threads_per_worker as written.
 CUSTOM_RESOURCES = "custom"
@@ -123,6 +125,7 @@ class CensorConfig:
     timeout_seconds: float
     quality: int
     avif_speed: int
+    opencv_threads: int
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,9 @@ class VideoConfig:
     start_muted: bool
     preset: str
     crf: int
+    hwaccel: str
+    hwaccel_device: str
+    max_threads: int
     ready_seconds: float
     segment_seconds: float
     seek_wait_seconds: float
@@ -497,6 +503,10 @@ def _validate(cfg: Config) -> None:
                           "must be >= 1")
     if cfg.video.max_concurrent_jobs < 1:
         raise ConfigError("video.max_concurrent_jobs must be >= 1")
+    if cfg.video.hwaccel not in HWACCEL_CHOICES:
+        raise ConfigError(f"video.hwaccel must be one of {HWACCEL_CHOICES}, got {cfg.video.hwaccel!r}")
+    if cfg.video.max_threads < 1 or cfg.censor.opencv_threads < 0:
+        raise ConfigError("video.max_threads must be >= 1 and censor.opencv_threads >= 0")
     if cfg.censor.style not in CENSOR_STYLES:
         raise ConfigError(f"censor.style must be one of {CENSOR_STYLES}, got {cfg.censor.style!r}")
     if cfg.logging.level not in LOG_LEVELS:

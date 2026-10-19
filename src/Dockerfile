@@ -7,9 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# ffmpeg decodes and re-encodes video (plain files, HLS and DASH).
+# ffmpeg decodes and re-encodes video (plain files, HLS and DASH). The VA-API
+# drivers (AMD through Mesa, Intel's two) let it use a GPU that compose
+# passes in (video.hwaccel); NVENC needs nothing here, since the NVIDIA
+# runtime mounts the host driver's libraries.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg mesa-va-drivers \
+       $(if [ "$(dpkg --print-architecture)" = amd64 ]; then echo intel-media-va-driver i965-va-driver; fi) \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

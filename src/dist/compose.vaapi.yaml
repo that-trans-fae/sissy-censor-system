@@ -1,0 +1,16 @@
+# Passes one GPU render node to the proxy for hardware video decoding and
+# encoding through VA-API (Intel and AMD on Linux; video.hwaccel). The
+# installer adds this file to COMPOSE_FILE in .env when the host has a
+# render node and a test encode in the container works there; rerun the
+# installer to add or drop it. Replaced at every update, like compose.yaml,
+# so don't edit it: SCS_RENDER_NODE and SCS_RENDER_GID go in .env.
+services:
+  censor-proxy:
+    devices:
+      # Only the render node (no display access), where video.hwaccel_device
+      # looks for it.
+      - "${SCS_RENDER_NODE:-/dev/dri/renderD128}:/dev/dri/renderD128"
+    # The node's group on the host (render), so the unprivileged user can
+    # open it. 44 is video, which owns render nodes on older systems.
+    group_add:
+      - "${SCS_RENDER_GID:-44}"

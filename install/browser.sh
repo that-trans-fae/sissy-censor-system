@@ -19,7 +19,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.sh | SCS_UNINSTALL=1 bash
 #
-# Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR.
+# Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, and SCS_GPU=0
+# to leave the GPU out of the container.
 set -euo pipefail
 
 # ---------------------------------------------------------------- settings
@@ -28,6 +29,7 @@ SCS_IMAGE_REPO="${SCS_IMAGE_REPO:-thattransfae/scs}"
 SCS_CHANNEL="${SCS_CHANNEL:-$SCS_IMAGE_REPO:latest}"
 SCS_DIR="${SCS_DIR:-$HOME/scs}"
 SCS_UNINSTALL="${SCS_UNINSTALL:-0}"
+SCS_GPU="${SCS_GPU:-1}"
 
 BROWSER_NAME="Sissy Browser"
 BROWSER_ID=sissy-browser
@@ -209,6 +211,42 @@ get_proxy() {
   # Run the container as this user (user: in compose.yaml).
   env_set SCS_UID "$(id -u)"
   env_set SCS_GID "$(id -g)"
+}
+
+# A GPU for video decoding and encoding (video.hwaccel) on Linux: compose
+# passes one in through an override file that COMPOSE_FILE in .env adds.
+# An override is kept only if the container's own test encode works with
+# it, since a device compose can't set up stops the proxy from starting.
+gpu_works() {
+  (cd "$SCS_DIR" && "${DOCKER[@]}" compose -f compose.yaml -f "$1" run --rm --no-deps -T \
+     censor-proxy python -m censor_proxy.hwaccel) >/dev/null 2>&1
+}
+
+setup_gpu() {
+  local files=compose.yaml node
+  if [ "$OS" = Linux ] && [ "$SCS_GPU" != 0 ]; then
+    log "Looking for a GPU for video"
+    if have nvidia-smi && { have nvidia-container-runtime-hook || have nvidia-ctk; } \
+       && gpu_works compose.nvidia.yaml; then
+      files="$files:compose.nvidia.yaml"
+    else
+      for node in /dev/dri/renderD*; do
+        [ -c "$node" ] || continue
+        env_set SCS_RENDER_NODE "$node"
+        env_set SCS_RENDER_GID "$(stat -c %g "$node")"
+        if gpu_works compose.vaapi.yaml; then
+          files="$files:compose.vaapi.yaml"
+          break
+        fi
+      done
+    fi
+  fi
+  case $files in
+    *nvidia*) log "Video will use the NVIDIA GPU" ;;
+    *vaapi*) log "Video will use the GPU at $node" ;;
+    *) [ "$OS" != Linux ] || log "No usable GPU found; video uses the CPU" ;;
+  esac
+  [ "$OS" != Linux ] || env_set COMPOSE_FILE "$files"
 }
 
 start_proxy() {
@@ -586,6 +624,7 @@ fi
 if [ "$OS" = Linux ]; then install_docker_linux; else install_docker_desktop_macos; fi
 start_docker
 get_proxy
+setup_gpu
 start_proxy
 install_chromium
 [ -f "$ICON_SVG" ] || die "icon missing from the image: $ICON_SVG"

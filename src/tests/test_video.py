@@ -694,3 +694,27 @@ def test_server_status_activity_and_cancel(server):
             return e.code
     assert cancel("https://evil.example") == 403 and not job.cancel_reason
     assert cancel("https://www.reddit.com") == 200 and "closed" in job.cancel_reason
+
+
+def test_pump_stops_when_the_encoder_goes_away(cfg):
+    class Gone(io.BytesIO):
+        def write(self, b):
+            raise BrokenPipeError("encoder exited")
+    w, h = 16, 16
+    src = io.BytesIO(bytes(w * h * 3 * 40))
+    with pytest.raises(BrokenPipeError):
+        _pump(src, Gone(), w, h, w * h * 3, 10.0, 2, Job("t", "x"), cfg, FakeDetector())
+
+
+@needs_ffmpeg
+def test_hardware_failure_is_redone_in_software(cfg, tmp_path, monkeypatch):
+    from censor_proxy import hwaccel
+    src = tmp_path / "in.mp4"
+    make_test_video(src, audio=False)
+    # A VAAPI render node that isn't there: the run's encoder fails at once.
+    monkeypatch.setattr(hwaccel, "method", lambda vcfg: "vaapi")
+    c = local_files(cfg, segment_seconds=1, hwaccel_device=str(tmp_path / "renderD128"))
+    job = Job("t", str(src), out_dir=tmp_path / "out")
+    censor_video(job, c, FakeDetector())
+    assert job.done == {0, 1} and job.runs == 2
+    assert hwaccel._disabled == {"vaapi"}

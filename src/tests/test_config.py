@@ -204,3 +204,11 @@ def test_builtin_whitelist_covers(make_config, host):
 ])
 def test_builtin_whitelist_leaves_image_hosts(make_config, host):
     assert not _passed_through(make_config(), host)
+
+
+def test_video_hwaccel_is_checked(make_config):
+    assert make_config("video: {hwaccel: vaapi}").video.hwaccel == "vaapi"
+    with pytest.raises(ConfigError):
+        make_config("video: {hwaccel: cuda}")
+    with pytest.raises(ConfigError):
+        make_config("video: {max_threads: 0}")

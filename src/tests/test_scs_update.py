@@ -69,6 +69,7 @@ elif args[:1] == ["run"] and "tar" in args:
     out = io.BytesIO()
     with tarfile.open(fileobj=out, mode="w") as t:
         for name, body in (("compose.yaml", f"# compose for {ref}\n"),
+                           ("compose.vaapi.yaml", f"# vaapi for {ref}\n"),
                            ("scs-update", "#!/usr/bin/env bash\necho next updater\n"),
                            ("browser-icon.svg", "<svg/>\n")):
             data = body.encode()
@@ -91,6 +92,7 @@ def install(tmp_path):
     (root / "logs").mkdir()
     shutil.copy(SCRIPT, root / "scs-update")
     (root / "compose.yaml").write_text("# compose for the old release\n")
+    (root / "compose.vaapi.yaml").write_text("# vaapi for the old release\n")
     (root / ".env").write_text(f"SCS_CHANNEL=hub/scs:latest\nSCS_IMAGE={OLD}\nSCS_UID=1000\n"
                                f'SCS_PROFILE="{tmp_path}/profile dir"\n')
     bin_ = tmp_path / "bin"
@@ -164,6 +166,9 @@ def test_applies_a_new_release(install):
     assert install.env("SCS_IMAGE") == NEW
     assert install.state()["running"] == NEW
     assert (install.path / "compose.yaml").read_text() == f"# compose for {NEW}\n"
+    # Its overrides too (COMPOSE_FILE may name them), in place before the container is recreated.
+    assert (install.path / "compose.vaapi.yaml").read_text() == f"# vaapi for {NEW}\n"
+    assert not list(install.path.glob(".compose*.previous"))
     # The updater and icon are replaced once the release is healthy.
     assert "next updater" in (install.path / "scs-update").read_text()
     assert os.access(install.path / "scs-update", os.X_OK)
@@ -201,6 +206,8 @@ def test_broken_release_rolls_back_and_is_skipped(install):
     assert install.env("SCS_IMAGE") == OLD
     assert install.state()["running"] == OLD
     assert (install.path / "compose.yaml").read_text() == "# compose for the old release\n"
+    assert (install.path / "compose.vaapi.yaml").read_text() == "# vaapi for the old release\n"
+    assert not list(install.path.glob(".compose*.previous"))
     assert "next updater" not in (install.path / "scs-update").read_text()
     assert not ran(calls, "image", "rm", kept(OLD)) and not ran(calls, "image", "rm", kept(NEW))
     s = install.status()

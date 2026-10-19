@@ -26,7 +26,8 @@ Chromium and %USERPROFILE%\scs):
 
   $env:SCS_UNINSTALL='1'; irm https://raw.githubusercontent.com/that-trans-fae/sissy-censor-system/main/install/browser.ps1 | iex; Remove-Item Env:SCS_UNINSTALL
 
-Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE.
+Environment overrides: SCS_IMAGE_REPO, SCS_CHANNEL, SCS_DIR, SCS_CHROMIUM_EXE,
+and SCS_GPU=0 to leave the GPU out of the container.
 #>
 & {
 $ErrorActionPreference = 'Stop'
@@ -164,6 +165,25 @@ function Get-Proxy {
     Set-EnvValue 'SCS_IMAGE' $image
     # scs-update.ps1 applies an update only while no browser runs on this profile.
     Set-EnvValue 'SCS_PROFILE' $ProfileDir
+}
+
+# An NVIDIA GPU for video decoding and encoding (video.hwaccel), through
+# Docker Desktop's WSL2 backend: compose passes it in through
+# compose.nvidia.yaml, which COMPOSE_FILE in .env adds. Kept only if the
+# container's own test encode works with it, since a GPU compose can't set
+# up stops the proxy from starting.
+function Set-Gpu {
+    $files = 'compose.yaml'
+    if ($env:SCS_GPU -ne '0' -and (Have 'nvidia-smi')) {
+        Log 'Looking for a GPU for video'
+        Push-Location $ScsDir
+        try {
+            docker compose -f compose.yaml -f compose.nvidia.yaml run --rm --no-deps -T censor-proxy python -m censor_proxy.hwaccel *> $null
+            if ($LASTEXITCODE -eq 0) { $files = 'compose.yaml;compose.nvidia.yaml' }
+        } finally { Pop-Location }
+    }
+    Log $(if ($files -ne 'compose.yaml') { 'Video will use the NVIDIA GPU' } else { 'No usable GPU found; video uses the CPU' })
+    Set-EnvValue 'COMPOSE_FILE' $files
 }
 
 function Start-Proxy {
@@ -425,6 +445,7 @@ try {
     Install-DockerDesktop
     Start-DockerDesktop
     Get-Proxy
+    Set-Gpu
     Start-Proxy
     $chromium = Install-Chromium
     Install-Shortcuts $chromium

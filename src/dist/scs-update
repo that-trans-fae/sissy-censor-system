@@ -186,8 +186,14 @@ apply() {
   previous=$(kv_get .env SCS_IMAGE)
   log "applying $target (was $previous)"
   stage=$(extract "$target") || { status error "Couldn't read the files out of release $AVAILABLE."; return 1; }
-  cp -p compose.yaml .compose.yaml.previous
-  mv -f "$stage/compose.yaml" compose.yaml
+  # compose.yaml and the overrides .env's COMPOSE_FILE may add to it
+  # (compose.vaapi.yaml, compose.nvidia.yaml) go in together, and back.
+  for f in "$stage"/compose*.yaml; do
+    [ -e "$f" ] || continue
+    f=${f##*/}
+    [ ! -e "$f" ] || cp -p "$f" ".$f.previous"
+    mv -f "$stage/$f" "$f"
+  done
   kv_set .env SCS_IMAGE "$target"
   if docker compose up -d >>update.log 2>&1 && wait_healthy; then
     # The updater and icon only once the release has proved itself; each
@@ -197,7 +203,7 @@ apply() {
       mv -f "$f" "$DIR/"
     done
     chmod +x scs-update
-    rm -rf "$stage" .compose.yaml.previous
+    rm -rf "$stage" .compose*.yaml.previous
     [ "$previous" = "$target" ] || unkeep "$previous"
     local bad
     bad=$(kv_get "$STATE" BAD)
@@ -208,7 +214,11 @@ apply() {
   fi
   log "release $AVAILABLE didn't become healthy; its last log lines:"
   docker compose logs --no-color --tail 40 "$SERVICE" >>update.log 2>&1
-  mv -f .compose.yaml.previous compose.yaml
+  for f in .compose*.yaml.previous; do
+    [ -e "$f" ] || continue
+    f=${f#.}
+    mv -f ".$f" "${f%.previous}"
+  done
   kv_set .env SCS_IMAGE "$previous"
   docker compose up -d >>update.log 2>&1
   rm -rf "$stage"

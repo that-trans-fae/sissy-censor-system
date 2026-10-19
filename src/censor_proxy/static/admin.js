@@ -156,6 +156,9 @@
   // ---- tabs -------------------------------------------------------------
 
   const TABS = ["overview", "whitelist", "detections", "video", "settings", "lock"];
+  // status.video.encoder (hwaccel.py).
+  const ENCODERS = { software: "software encoding", vaapi: "GPU encoding (VAAPI)",
+                     nvenc: "GPU encoding (NVIDIA)" };
   let current = null;
   let poll = null;
 
@@ -216,7 +219,8 @@
       ["Image model", `${s.model}${s.tiling ? ", tiling" : ""}`],
       ["Resources", `${s.resources_label}: ${plural(s.workers, "worker")}, ${plural(s.threads_per_worker, "thread")}, ` +
                     `${plural(s.video.max_concurrent_jobs, "video")} at once`],
-      ["Video", s.video.enabled ? `on, ${s.video.model}` : "off"],
+      ["Video", s.video.enabled ? `on, ${s.video.model}` + (s.video.encoder ? `, ${ENCODERS[s.video.encoder] ||
+                                   s.video.encoder}` : "") : "off"],
       ["Censor style", s.censor_style],
       ["On failure", s.fail_closed ? "censor the whole image" : "deliver unmodified"],
       ["Cached results", fmtInt(s.cache_entries)],

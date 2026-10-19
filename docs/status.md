@@ -116,6 +116,22 @@ Last updated Oct 19, 2026.
   agent and Windows task are written but untried, and the PowerShell
   updater is parse-checked only
 
+- Video CPU use (Oct 19, 2026): the video model's threads capped
+  (`video.max_threads`), one OpenCV thread per operation, and blurring and
+  encoder writes on their own thread. Measured with `tools/bench_video.py`
+  on a 1080p30 clip: 2.5x real time instead of 1.5–1.6x at the Maximum
+  level, with 43% less CPU. Unit-tested and benchmarked; not yet watched in
+  the browser
+- Hardware video decoding and encoding (`video.hwaccel`, Oct 19, 2026):
+  VAAPI (Intel, AMD) and NVENC/NVDEC (NVIDIA), with a test encode at
+  startup, libx264 otherwise, and failed hardware runs redone in software
+  (tested with a missing VAAPI device). The installers pass a GPU in
+  through `dist/compose.vaapi.yaml` or `compose.nvidia.yaml` (`COMPOSE_FILE`
+  in `.env`), and `scs-update` swaps and rolls back those files with
+  `compose.yaml` (pytest against a fake docker). Not yet run on a real GPU:
+  this machine runs Docker Desktop, which can't pass one through, and has no
+  NVIDIA card; the installers' GPU detection is syntax-checked only
+
 ## Not done yet
 
 - **Video**: built and tested end to end with curl (injection, CSP, jobs),

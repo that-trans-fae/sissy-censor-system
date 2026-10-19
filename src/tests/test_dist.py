@@ -41,6 +41,22 @@ def test_dist_compose_variables_have_defaults():
         assert op == ":-" or name == "SCS_IMAGE", name
 
 
+def test_gpu_overrides():
+    # Only what the installers add for a GPU; anything else belongs in compose.yaml.
+    vaapi = service(SRC / "dist" / "compose.vaapi.yaml")
+    nvidia = service(SRC / "dist" / "compose.nvidia.yaml")
+    assert sorted(vaapi) == ["devices", "group_add"] and sorted(nvidia) == ["deploy"]
+    # The node lands where video.hwaccel_device looks.
+    assert expand(vaapi["devices"]) == ["/dev/dri/renderD128:/dev/dri/renderD128"]
+    from censor_proxy.config import from_override
+    assert from_override({}).video.hwaccel_device == "/dev/dri/renderD128"
+    device, = nvidia["deploy"]["resources"]["reservations"]["devices"]
+    assert device["driver"] == "nvidia" and "video" in device["capabilities"]
+    for name in ("compose.vaapi.yaml", "compose.nvidia.yaml"):
+        for var, op, _ in VAR.findall((SRC / "dist" / name).read_text()):
+            assert op == ":-", var
+
+
 def test_dist_files():
     assert os.access(SRC / "dist" / "scs-update", os.X_OK)
     dockerfile = (SRC / "Dockerfile").read_text()

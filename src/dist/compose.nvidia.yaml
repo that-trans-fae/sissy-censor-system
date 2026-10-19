@@ -1,0 +1,17 @@
+# Passes an NVIDIA GPU to the proxy for hardware video decoding (NVDEC) and
+# encoding (NVENC; video.hwaccel), through the NVIDIA Container Toolkit on
+# Linux or Docker Desktop's WSL2 backend on Windows. The installer adds this
+# file to COMPOSE_FILE in .env when it finds an NVIDIA GPU and a test encode
+# in the container works; rerun the installer to add or drop it. Replaced at
+# every update, like compose.yaml, so don't edit it.
+services:
+  censor-proxy:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              # The driver libraries ffmpeg needs: CUDA for decoding, the
+              # video codec SDK for both.
+              capabilities: [gpu, compute, video, utility]

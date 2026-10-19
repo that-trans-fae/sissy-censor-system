@@ -128,6 +128,25 @@ playback resumes after a second or two. Videos the control can't find
 a source for stay covered. The control's text and colours are at the top of
 `censor_proxy/static/inject.js`; its name is `video.brand_name`.
 
+ffmpeg decodes and encodes on a GPU when the container has one
+(`video.hwaccel`: auto, none, vaapi or nvenc; detection stays on the CPU).
+Installs get one from the installer on Linux (Intel and AMD through VAAPI,
+NVIDIA through the NVIDIA Container Toolkit) and on Windows (NVIDIA), as an
+override that `COMPOSE_FILE` in `.env` adds. In development, under Docker
+Engine:
+
+```bash
+docker compose -f compose.yaml -f dist/compose.vaapi.yaml up -d --build
+```
+
+The panel's Overview shows which is in use. To see what a change to the
+pipeline does, time a job's stages on a clip (timings only):
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/..:/w" -w /w/src censor-proxy \
+  python tools/bench_video.py ../docs/samples/censor/CLIP.mp4 --size 1920x1080
+```
+
 `video_attribution` (off by default, still being tuned) passes male chests
 the model reads as female, deciding from evidence across the video: a
 second pass runs 640m about once a second, ahead of the job, and where the

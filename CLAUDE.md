@@ -23,6 +23,7 @@ src/censor_proxy/detection.py  NudeNet wrapper (with tiling) and decide(), the s
 src/censor_proxy/datauri.py    base64 data-URI images in HTML/CSS/JSON bodies
 src/censor_proxy/video.py      video jobs: ffmpeg decode -> detect -> blur -> fMP4
 src/censor_proxy/attribution.py  video sex attribution: 640m scan ahead of the job, male stretches
+src/censor_proxy/hwaccel.py    video.hwaccel: GPU decode/encode method, its ffmpeg arguments, the test encode
 src/censor_proxy/server.py     internal HTTP server behind https://censor.local
 src/censor_proxy/inject.py     HTML script injection and CSP extension
 src/censor_proxy/admin.py      admin panel server (localhost:8082, scs.local): PIN, config edits
@@ -32,10 +33,12 @@ src/censor_proxy/config.py     dataclasses + loader (defaults.yaml merged with u
 src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
 src/censor_proxy/updates.py    container side of auto-update: policy and health commands, status for the panel
-src/dist/                      copied out of the image onto users' machines: compose.yaml, scs-update(.ps1)
+src/dist/                      copied out of the image onto users' machines: compose.yaml and its GPU
+                               overrides (compose.vaapi.yaml, compose.nvidia.yaml), scs-update(.ps1)
 src/config/config.yaml         user overrides, mounted at /config
 src/tools/draw_boxes.py        box-draw review of the samples
 src/tools/dump_video_scores.py, replay_attribution.py  video attribution tuning
+src/tools/bench_video.py       times a video job's stages (decode, detection, blur, encode) and a whole job
 src/tools/release.sh           build amd64+arm64 and push to Docker Hub as VERSION and latest
 src/tests/                     pytest; fixtures/expected-<model>.json
 docs/brand/                    mark, README banners, palette, browser icon
@@ -101,7 +104,13 @@ iframes are injected (`Sec-Fetch-Dest`), never fetched HTML fragments. The addon
 `censor.local` to the internal server on `proxy.internal_port`; jobs run
 ffmpeg in `video.py` and write fixed-length fMP4 segments, which the
 script plays through Media Source Extensions while the job runs. A seek
-past what is done restarts the job at that segment (`Job.seek()`). Job
+past what is done restarts the job at that segment (`Job.seek()`). In a
+run, the pump reads frames and detects on samples; a `_Writer` thread
+blurs and writes them to the encoder. ffmpeg decodes and encodes on a GPU
+when `hwaccel.py` finds one that compose passed in (`COMPOSE_FILE` in
+`.env` adds `dist/compose.vaapi.yaml` or `compose.nvidia.yaml`), and a
+hardware run that fails is redone in software. Time changes to the
+pipeline with `tools/bench_video.py`. Job
 requests are only accepted from origins matching `video.hosts`, and only
 for public addresses (`video.allow_private_sources` relaxes that). See
 `docs/video-design.md`.
@@ -139,8 +148,8 @@ Upgrades must keep old installs working:
 - A renamed or removed config key gets an entry in `config.MIGRATIONS`, or
   an existing `config.yaml` stops the new release from starting (it is then
   rolled back and skipped).
-- `dist/compose.yaml` is replaced at each update, but `.env` is not: a new
-  variable needs a `${VAR:-default}`. Keep it in step with `compose.yaml`
+- `dist/compose.yaml` and its `compose.*.yaml` overrides are replaced at
+  each update, but `.env` is not: a new variable needs a `${VAR:-default}`. Keep it in step with `compose.yaml`
   (`tests/test_dist.py`).
 - `scs-update` runs on macOS's bash 3.2 and on the host, so it never
   evaluates anything from the container or the folders it can write

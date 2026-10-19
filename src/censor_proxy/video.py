@@ -22,6 +22,7 @@ import ipaddress
 import json
 import logging
 import math
+import queue
 import re
 import secrets
 import shutil
@@ -38,8 +39,9 @@ from urllib.parse import urlsplit
 import cv2
 import numpy as np
 
+from . import hwaccel
 from .attribution import Scanner, Timeline, male_detection
-from .config import Config
+from .config import CensorConfig, Config
 from .detection import Box, Detector, decide
 from .imaging import apply_censor
 
@@ -54,6 +56,11 @@ class VideoError(RuntimeError):
 
 class JobRefused(VideoError):
     """Over the queue cap or a page's rate limit; try again later."""
+
+
+class CodecError(VideoError):
+    """ffmpeg failed decoding or encoding (rather than the source ending
+    early): a hardware run that hits this is redone in software."""
 
 
 @dataclass(frozen=True)
@@ -267,14 +274,18 @@ class VideoJobs:
         self._slot_freed = threading.Condition(self._lock)
         self._attempts = 0
         self._starts: dict[str, deque[float]] = {}  # origin -> recent start times
+        if vcfg.enabled:
+            hwaccel.choose_soon(vcfg)
 
     @property
     def detector(self) -> Detector:
         with self._detector_lock:
             if self._detector is None:
-                v = self.cfg.video
-                self._detector = Detector(replace(self.cfg.model, path=v.model_path,
-                                                  resolution=v.model_resolution, tiling=v.tiling))
+                v, m = self.cfg.video, self.cfg.model
+                self._detector = Detector(replace(m, path=v.model_path, resolution=v.model_resolution,
+                                                  tiling=v.tiling,
+                                                  threads_per_worker=min(m.threads_per_worker,
+                                                                         v.max_threads)))
             return self._detector
 
     @property
@@ -303,8 +314,10 @@ class VideoJobs:
         startup."""
         with self._detector_lock:
             old, new = self.cfg, cfg
-            if (old.model, old.video.model_path, old.video.model_resolution, old.video.tiling) != \
-                    (new.model, new.video.model_path, new.video.model_resolution, new.video.tiling):
+            if (old.model, old.video.model_path, old.video.model_resolution, old.video.tiling,
+                    old.video.max_threads) != \
+                    (new.model, new.video.model_path, new.video.model_resolution, new.video.tiling,
+                     new.video.max_threads):
                 self._detector = None
             if (old.model, old.video_attribution.model_path, old.video_attribution.model_resolution,
                     old.video_attribution.tiling) != \
@@ -312,8 +325,15 @@ class VideoJobs:
                      new.video_attribution.model_resolution, new.video_attribution.tiling):
                 self._attribution_detector = None
             self.cfg = cfg
+        if new.video.enabled:
+            hwaccel.choose_soon(new.video)
         with self._lock:
             self._slot_freed.notify_all()  # a higher limit starts waiting jobs now
+
+    def encoder(self) -> str | None:
+        """How video is decoded and encoded (hwaccel.py); None while that is
+        being worked out."""
+        return hwaccel.current(self.cfg.video)
 
     def active(self) -> int:
         with self._lock:
@@ -619,15 +639,35 @@ def censor_video(job: Job, cfg: Config, detector: Detector,
                segments=max(1, math.ceil(p.duration * fps / seg - 1e-6)) if p.duration else None,
                audio=vcfg.audio and p.audio_index is not None)
     job.out_dir.mkdir(parents=True, exist_ok=True)
+    method = hwaccel.method(vcfg)
+    failed = None  # a hardware method this job gave up on
     start = job.take_restart() or 0
     while start is not None:
-        start = _censor_run(job, start, p, w, h, fps, step, cfg, detector, attribution_detector)
+        try:
+            nxt = _censor_run(job, start, p, w, h, fps, step, cfg, detector, attribution_detector,
+                              method)
+        except CodecError as e:
+            if method == hwaccel.SOFTWARE:
+                raise
+            log.warning("video %s: %s failed at segment %d, redoing it in software: %s",
+                        job.id, method, start, e)
+            for f in job.out_dir.glob("*.tmp"):
+                f.unlink(missing_ok=True)
+            failed, method = (method, str(e)), hwaccel.SOFTWARE
+            start = job.first_missing(start)
+            continue
+        if failed:  # software managed what the hardware couldn't
+            hwaccel.disable(*failed)
+            failed = None
+        start = nxt
 
 
 def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step: int,
-                cfg: Config, detector: Detector, attribution_detector: Detector | None) -> int | None:
-    """One run, from segment `first`. Returns the segment the next run
-    starts at, or None when every segment is done."""
+                cfg: Config, detector: Detector, attribution_detector: Detector | None,
+                method: str = hwaccel.SOFTWARE) -> int | None:
+    """One run, from segment `first`, decoding and encoding with `method`
+    (hwaccel.py). Returns the segment the next run starts at, or None when
+    every segment is done."""
     vcfg = cfg.video
     seg = job.segment_frames
     t0 = first * job.segment_seconds
@@ -649,10 +689,12 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
     # Otherwise frames before t0 are decoded and dropped. Half a frame early,
     # so rounding never drops the one at t0.
     trim = f"trim=start={t0 - 0.5 / fps:.6f},setpts=PTS-STARTPTS," if first and not seek else ""
-    decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *seek, "-i", job.src,
+    hw_decode = hwaccel.decode_args(method, vcfg)
+    decode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *hw_decode, *net, *seek, "-i", job.src,
                   "-map", f"0:{p.video_index}", "-vf", f"{trim}scale={w}:{h}", "-r", f"{fps:.6g}",
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     encode_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+                  *hwaccel.encode_device_args(method, vcfg),
                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", f"{fps:.6g}",
                   "-i", "pipe:0"]
     if job.audio:
@@ -662,8 +704,7 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
             encode_cmd += ["-af", f"atrim=start={t0:.6f},asetpts=PTS-STARTPTS"]
     else:
         encode_cmd += ["-map", "0:v"]
-    encode_cmd += ["-c:v", "libx264", "-preset", vcfg.preset, "-crf", str(vcfg.crf),
-                   "-pix_fmt", "yuv420p",
+    encode_cmd += [*hwaccel.encode_args(method, vcfg),
                    # Keyframes exactly at segment starts and nowhere else, so
                    # every run cuts segment n at the same frame. The muxer
                    # cuts at the first keyframe past each multiple of hls_time.
@@ -684,7 +725,8 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
         scan_t0 = max(0.0, t0 - acfg.history_seconds)
         scan_seek = ["-ss", f"{scan_t0:.6f}"] if scan_t0 and job.seekable else []
         scan_trim = f"trim=start={scan_t0:.6f},setpts=PTS-STARTPTS," if scan_t0 and not scan_seek else ""
-        scan_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, *scan_seek, "-i", job.src,
+        scan_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *hw_decode, *net, *scan_seek,
+                    "-i", job.src,
                     "-map", f"0:{p.video_index}",
                     "-vf", f"{scan_trim}fps={acfg.sample_fps:.6g},scale={w}:{h}",
                     "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
@@ -739,10 +781,10 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
         else:
             if stopped == "end" and dec_rc != 0:
                 dec_err.seek(0)
-                raise VideoError(f"decode failed: {dec_err.read().decode(errors='replace').strip()[:300]}")
+                raise CodecError(f"decode failed: {dec_err.read().decode(errors='replace').strip()[:300]}")
             if enc_rc != 0:
                 enc_err.seek(0)
-                raise VideoError(f"encode failed: {enc_err.read().decode(errors='replace').strip()[:300]}")
+                raise CodecError(f"encode failed: {enc_err.read().decode(errors='replace').strip()[:300]}")
 
     last = first + math.ceil(frames / seg)  # one past the last segment this run fed
     for n in range(first, last):
@@ -762,7 +804,7 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
         if not last:
             raise VideoError("the source has no video frames")
         if frames and not job.check(first):
-            raise VideoError("the encoder wrote no segments")
+            raise CodecError("the encoder wrote no segments")
         job.update(segments=last)  # the real length
     restart = job.take_restart()
     if restart is not None and not job.check(restart):
@@ -770,13 +812,86 @@ def _censor_run(job: Job, first: int, p: Probe, w: int, h: int, fps: float, step
     return job.first_missing(last if stopped != "seek" else first)
 
 
+# Batches (the frames from one sample to the next) waiting for the writer
+# thread: enough to keep it busy while the pump reads and detects, few
+# enough that a 720p job holds only a few dozen frames.
+WRITE_QUEUE = 2
+
+
+class _Writer:
+    """Blurs and writes frames to the encoder on its own thread, so that
+    overlaps reading the decoder and detection (OpenCV, numpy copies and
+    pipe writes release the GIL). Batches are written in the order they
+    are put. An error on the thread (the encoder's pipe closing) is raised
+    in the pump at its next put()."""
+
+    def __init__(self, dst, censor: CensorConfig, job: Job):
+        self.dst, self.censor, self.job = dst, censor, job
+        self.written = 0
+        self.error: BaseException | None = None
+        self._queue: queue.Queue = queue.Queue(maxsize=WRITE_QUEUE)
+        self._cancelled = False
+        self._thread = threading.Thread(target=self._run, name=f"write-{job.id[:8]}", daemon=True)
+        self._thread.start()
+
+    def put(self, frames: list[np.ndarray], boxes: list[Box]) -> None:
+        if frames:
+            self._put((frames, boxes))
+
+    def finish(self) -> int:
+        """Wait until everything put is written; the frames written."""
+        self._put(None)
+        self._thread.join()
+        if self.error:
+            raise self.error
+        return self.written
+
+    def cancel(self) -> None:
+        """Drop what is queued and stop without waiting: the caller kills
+        the encoder, which ends a write in progress."""
+        self._cancelled = True
+        try:
+            while True:
+                self._queue.get_nowait()
+        except queue.Empty:
+            pass
+        self._queue.put_nowait(None)
+
+    def _put(self, item) -> None:
+        while True:
+            if self.error:
+                raise self.error
+            try:
+                self._queue.put(item, timeout=0.25)
+                return
+            except queue.Full:
+                pass  # the encoder is behind; the watchdog handles one that has stalled
+
+    def _run(self) -> None:
+        try:
+            while (item := self._queue.get()) is not None:
+                frames, boxes = item
+                for frame in frames:
+                    if self._cancelled:
+                        return
+                    for box in boxes:
+                        apply_censor(frame, box, self.censor)
+                    self.dst.write(frame)
+                self.written += len(frames)
+                if boxes:
+                    self.job.update(frames_censored=self.job.frames_censored + len(frames))
+        except BaseException as e:
+            self.error = e
+
+
 def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detector: Detector,
           timeline: Timeline | None = None, first: int = 0, segment_frames: int = 0,
           run: int = 0) -> tuple[str, int]:
     """Read raw frames, censor, write raw frames. Frames between samples wait
-    in `pending` until the next sample's boxes are known. With a timeline,
-    each sample first waits for the attribution scan to get far enough ahead,
-    and male stretches use the male detection config.
+    in `pending` until the next sample's boxes are known; blurring and
+    writing happen on a _Writer thread. With a timeline, each sample first
+    waits for the attribution scan to get far enough ahead, and male
+    stretches use the male detection config.
 
     With segment_frames, frame 0 starts segment `first`, and at each segment
     start the pump stops if that segment is already done, or else claims it
@@ -789,7 +904,7 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
     pending: list[np.ndarray] = []
     prev_boxes: list[Box] = []
     unconfirmed: list[int] = []  # segments fed to the encoder, not yet on disk
-    index = written = failures = 0
+    index = failures = 0
     was_male = scan_failed = False
 
     def attributed_male(t: float) -> bool:
@@ -822,50 +937,46 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
             job.position, job.run_first = m, first
         return True
 
-    def flush(frames: list[np.ndarray], boxes: list[Box]) -> None:
-        nonlocal written
-        for frame in frames:
-            for box in boxes:
-                apply_censor(frame, box, cfg.censor)
-            dst.write(frame.tobytes())
-        written += len(frames)
-        job.update(frames_censored=job.frames_censored + (len(frames) if boxes else 0))
-
-    while True:
-        buf = src.read(frame_bytes)
-        if len(buf) < frame_bytes:
-            break
-        job.alive = time.monotonic()
-        frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3).copy()
-        if index % step == 0:
-            if reason := job.stop_reason(cfg.video.abandon_seconds):
-                raise VideoError(reason)
-            if job.restart_at is not None:
-                raise _Seek()
-        if index % step:
-            pending.append(frame)
-        else:
-            detection = cfg.detection
-            if timeline and attributed_male(t0 + index / fps):
-                detection = male_cfg
-                job.update(seconds_male=job.seconds_male + step / fps)
-            try:
-                bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                boxes = [d.detection.box.padded(pad, w, h)
-                         for d in decide(detector.detect(bgr), detection) if d.censor]
-                failures = 0
-            except Exception as e:
-                failures += 1
-                if failures >= 3:
-                    raise VideoError(f"detection failing repeatedly: {e}") from e
-                # Fail closed: this stretch is covered completely.
-                boxes = [Box(0, 0, w, h)]
-            flush(pending, prev_boxes + boxes)
-            if segment_frames and index % segment_frames == 0 and not segment_start():
-                return "reached", written
-            flush([frame], prev_boxes + boxes)
-            pending, prev_boxes = [], boxes
-            unconfirmed[:] = [m for m in unconfirmed if not job.check(m)]
-        index += 1
-    flush(pending, prev_boxes)
-    return "end", written
+    writer = _Writer(dst, cfg.censor, job)
+    try:
+        while True:
+            buf = src.read(frame_bytes)
+            if len(buf) < frame_bytes:
+                break
+            job.alive = time.monotonic()
+            frame = np.frombuffer(buf, np.uint8).reshape(h, w, 3).copy()
+            if index % step == 0:
+                if reason := job.stop_reason(cfg.video.abandon_seconds):
+                    raise VideoError(reason)
+                if job.restart_at is not None:
+                    raise _Seek()
+            if index % step:
+                pending.append(frame)
+            else:
+                detection = cfg.detection
+                if timeline and attributed_male(t0 + index / fps):
+                    detection = male_cfg
+                    job.update(seconds_male=job.seconds_male + step / fps)
+                try:
+                    bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    boxes = [d.detection.box.padded(pad, w, h)
+                             for d in decide(detector.detect(bgr), detection) if d.censor]
+                    failures = 0
+                except Exception as e:
+                    failures += 1
+                    if failures >= 3:
+                        raise VideoError(f"detection failing repeatedly: {e}") from e
+                    # Fail closed: this stretch is covered completely.
+                    boxes = [Box(0, 0, w, h)]
+                writer.put(pending, prev_boxes + boxes)
+                if segment_frames and index % segment_frames == 0 and not segment_start():
+                    return "reached", writer.finish()
+                writer.put([frame], prev_boxes + boxes)
+                pending, prev_boxes = [], boxes
+                unconfirmed[:] = [m for m in unconfirmed if not job.check(m)]
+            index += 1
+        writer.put(pending, prev_boxes)
+        return "end", writer.finish()
+    except BaseException:
+        writer.cancel()
+        raise
