@@ -22,6 +22,7 @@ src/censor_proxy/imaging.py    Censor.censor_bytes(): decode, detect, blur, re-e
 src/censor_proxy/detection.py  NudeNet wrapper (with tiling) and decide(), the selection rule
 src/censor_proxy/datauri.py    base64 data-URI images in HTML/CSS/JSON bodies
 src/censor_proxy/video.py      video jobs: ffmpeg decode -> detect -> blur -> fMP4
+src/censor_proxy/attribution.py  video sex attribution: 640m scan ahead of the job, male stretches
 src/censor_proxy/server.py     internal HTTP server behind https://censor.local
 src/censor_proxy/inject.py     HTML script injection and CSP extension
 src/censor_proxy/admin.py      admin panel server (localhost:8082, scs.local): PIN, config edits
@@ -32,6 +33,7 @@ src/censor_proxy/defaults.yaml every option, documented
 src/censor_proxy/detection_log.py  JSONL detection log
 src/config/config.yaml         user overrides, mounted at /config
 src/tools/draw_boxes.py        box-draw review of the samples
+src/tools/dump_video_scores.py, replay_attribution.py  video attribution tuning
 src/tests/                     pytest; fixtures/expected-<model>.json
 docs/brand/                    mark, README banners, palette
 docs/samples/{censor,mixed,uncensor}/  sample images (not in git)
@@ -97,6 +99,13 @@ ffmpeg in `video.py` and stream fragmented MP4 back while they run. Job
 requests are only accepted from origins matching `video.hosts`, and only
 for public addresses (`video.allow_private_sources` relaxes that). See
 `docs/video-design.md`.
+
+With `video_attribution.enabled` (off until tuned), a job also runs a
+second ffmpeg decode at 1 fps through 640m (`attribution.py`), and the pump
+waits until that scan is `lookahead_seconds` ahead before each sample.
+Where the window around a moment has male evidence and no female evidence,
+`pass_labels` (exposed breasts) drop out of the detection config. Scan
+failures fall back to normal censoring.
 
 The same script draws image placeholders (`images.placeholders`): an
 `<img>` still loading a moment after it comes into view gets a "Censoring"

@@ -299,6 +299,54 @@ video:
   # source URLs, errors) to the proxy log. Includes page URLs.
   debug: false
 
+video_attribution:
+  # Decide from evidence across a video, not frame by frame, when its
+  # subject is male, and pass male chests the model reads as female there.
+  # A second, low-rate pass runs the attribution model ahead of the job; a
+  # moment is in a male stretch when its window (history_seconds before to
+  # lookahead_seconds after) has at least min_male_samples frames with male
+  # evidence and at most max_female_samples with female evidence. Off until
+  # tuned on straight videos, where a woman's breasts must stay censored.
+  enabled: false
+  # Model for the attribution pass. 640m sees male faces and penises far
+  # more reliably than 320n (~0.5 s per frame without tiling).
+  model_path: /app/models/640m.onnx
+  model_resolution: 640
+  tiling: false
+  # Frames per second the attribution pass looks at.
+  sample_fps: 1
+  # The window around each moment. Playback waits until the pass is
+  # lookahead_seconds ahead, so a woman coming into frame is seen before
+  # her frames are written. That delays the start: ready after ~8.5 s
+  # instead of ~1.5 s at 10, ~6 s at 5. Jobs also run slower (1.4x real
+  # time instead of 3.9x for 720p).
+  history_seconds: 30
+  lookahead_seconds: 10
+  # Male evidence: a frame with one of these labels at male_threshold or
+  # more.
+  male_labels:
+    - MALE_GENITALIA_EXPOSED
+    - FACE_MALE
+  male_threshold: 0.35
+  min_male_samples: 3
+  # Female evidence: a frame with one of these labels at female_threshold or
+  # more. On the reported male video, 640m's female evidence never reached
+  # 0.45 and reached 0.35 on 3 of 410 frames; 0.35 is the cautious choice
+  # until straight videos have been measured.
+  female_labels:
+    - FACE_FEMALE
+    - FEMALE_GENITALIA_EXPOSED
+  female_threshold: 0.35
+  max_female_samples: 0
+  # In a male stretch these labels are neither censored nor female context
+  # (so pairs stop corroborating each other, and buttocks next to them can
+  # pass as male).
+  pass_labels:
+    - FEMALE_BREAST_EXPOSED
+  # If the pass makes no progress for this long, the job carries on
+  # without it, censoring as if attribution were off.
+  stall_seconds: 30
+
 proxy:
   # Hostname the proxy answers on itself (/health, /inject.js, /video/...).
   # Requests to it are routed to an internal server on internal_port.
@@ -389,6 +437,13 @@ whitelist:
     - '(^|\.)(nflxvideo|nflximg|nflxso|disney-plus)\.net:'
     - '(^|\.)pluto\.tv:'
     - '^tv\.apple\.com:'
+    # YouTube, its embeds and short links, thumbnails and video segments.
+    # googlevideo.com is YouTube's video CDN; Drive's and Photos' videos
+    # play from it too, but videos aren't image-censored in the stream
+    # either way (the video control covers them).
+    - '(^|\.)(youtube|youtube-nocookie)\.com:'
+    - '(^|\.)youtu\.be:'
+    - '(^|\.)(ytimg|googlevideo)\.com:'
     # Government, military and education sites: US, UK government and
     # Australian education.
     - '\.(gov|mil|edu|gov\.uk|edu\.au):'

@@ -399,7 +399,8 @@
         h("td", {}, h("span", { class: `badge ${j.state}`, text: j.state }),
           j.error || j.cancel_reason ? h("span", { class: "reason", text: j.error || j.cancel_reason }) : null),
         h("td", {}, `${fmtClock(j.seconds_done)} / ${fmtClock(j.duration)}`, bar),
-        h("td", { class: "num", text: fmtInt(j.frames_censored) }),
+        h("td", { class: "num" }, fmtInt(j.frames_censored),
+          j.seconds_male ? h("span", { class: "reason", text: `${fmtClock(j.seconds_male)} male` }) : null),
         h("td", { class: "host" }, hostOf(j.src),
           h("span", { class: "url", title: j.src, text: shorten(j.src, 120) }),
           j.page ? h("span", { class: "reason", title: j.page, text: `on ${hostOf(j.page) || shorten(j.page, 60)}` }) : null),
@@ -419,7 +420,8 @@
   const SKIP_SECTIONS = new Set(["whitelist"]);  // has its own tab
   const SKIP_KEYS = new Set(["detection.preset"]);  // the level picker above the sections
   // Pairs of keys shown as one model picker (choices from model.available).
-  const MODEL_PICKERS = { model: ["path", "resolution"], video: ["model_path", "model_resolution"] };
+  const MODEL_PICKERS = { model: ["path", "resolution"], video: ["model_path", "model_resolution"],
+                          video_attribution: ["model_path", "model_resolution"] };
   const CUSTOM = "custom";
   const isNum = (v) => typeof v === "number";
   const title = (name) => name.charAt(0).toUpperCase() + name.slice(1);

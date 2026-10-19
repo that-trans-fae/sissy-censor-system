@@ -78,7 +78,8 @@ HIDDEN_KEYS = frozenset({"admin.pin_hash"})
 # Settable, but edited in config.yaml rather than shown as fields: the panel
 # offers them as choices (the censoring level, the model list).
 NOT_SHOWN_KEYS = frozenset({"detection.presets", "model.available"})
-NULLABLE_KEYS = frozenset({"logging.path", "detection.label_thresholds", "admin.attempts_log"})
+NULLABLE_KEYS = frozenset({"logging.path", "detection.label_thresholds", "admin.attempts_log",
+                           "video_attribution.model_path"})
 PIN = re.compile(r"^\d{4,12}$")
 COOKIE = "scs_admin"
 PBKDF2_ITERATIONS = 200_000

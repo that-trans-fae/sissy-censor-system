@@ -155,6 +155,25 @@ class VideoConfig:
 
 
 @dataclass(frozen=True)
+class VideoAttributionConfig:
+    enabled: bool
+    model_path: str | None
+    model_resolution: int
+    tiling: bool
+    sample_fps: float
+    history_seconds: float
+    lookahead_seconds: float
+    male_labels: frozenset[str]
+    male_threshold: float
+    min_male_samples: int
+    female_labels: frozenset[str]
+    female_threshold: float
+    max_female_samples: int
+    pass_labels: frozenset[str]
+    stall_seconds: float
+
+
+@dataclass(frozen=True)
 class ProxyConfig:
     health_host: str
     admin_host: str
@@ -217,6 +236,7 @@ class Config:
     images: ImagesConfig
     data_uris: DataUrisConfig
     video: VideoConfig
+    video_attribution: VideoAttributionConfig
     proxy: ProxyConfig
     whitelist: WhitelistConfig
     admin: AdminConfig
@@ -329,6 +349,11 @@ def _build(raw: dict[str, Any]) -> Config:
         ),
         "video": VideoConfig(**{**raw["video"], "hosts": tuple(raw["video"]["hosts"] or ()),
                                 "source_protocols": tuple(raw["video"]["source_protocols"] or ())}),
+        "video_attribution": VideoAttributionConfig(**{
+            **raw["video_attribution"],
+            **{k: frozenset(raw["video_attribution"][k] or ())
+               for k in ("male_labels", "female_labels", "pass_labels")},
+        }),
         "proxy": ProxyConfig(
             health_host=raw["proxy"]["health_host"],
             admin_host=str(raw["proxy"]["admin_host"]).lower(),
@@ -386,6 +411,14 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("video.sample_fps must be > 0")
     if cfg.video.abandon_seconds <= 0 or cfg.video.idle_seconds <= 0:
         raise ConfigError("video.abandon_seconds and video.idle_seconds must be > 0")
+    a = cfg.video_attribution
+    if a.sample_fps <= 0 or a.stall_seconds <= 0:
+        raise ConfigError("video_attribution.sample_fps and stall_seconds must be > 0")
+    if a.history_seconds < 0 or a.lookahead_seconds < 0:
+        raise ConfigError("video_attribution.history_seconds and lookahead_seconds must be >= 0")
+    if a.min_male_samples < 1 or a.max_female_samples < 0:
+        raise ConfigError("video_attribution.min_male_samples must be >= 1 and "
+                          "max_female_samples >= 0")
     for domain in cfg.whitelist.domains:
         if not DOMAIN.match(domain):
             raise ConfigError(f"whitelist.domains: not a domain: {domain!r}")

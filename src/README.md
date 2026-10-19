@@ -120,6 +120,24 @@ starts after a few seconds of video are ready. Videos the control can't find
 a source for stay covered. The control's text and colours are at the top of
 `censor_proxy/static/inject.js`; its name is `video.brand_name`.
 
+`video_attribution` (off by default, still being tuned) passes male chests
+the model reads as female, deciding from evidence across the video: a
+second pass runs 640m about once a second, ahead of the job, and where the
+surrounding 40 s show a man and no woman, exposed breasts pass. It delays
+playback by several seconds. To tune it, dump a video's scores (scores
+only, no frames kept; the source URL is in the proxy log with
+`video.debug` on) and replay them under different settings:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/..:/w" -w /w/src censor-proxy \
+  python tools/dump_video_scores.py 'https://…/master.m3u8' /w/docs/samples/video/NAME.json --referer 'https://…/'
+```
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/..:/w" -w /w/src censor-proxy \
+  python tools/replay_attribution.py /w/docs/samples/video/*.json --config config/config.yaml
+```
+
 ## Image placeholders
 
 The proxy holds each image until it is censored, so on image-heavy pages

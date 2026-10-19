@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 import cv2
 import numpy as np
 
+from .attribution import Scanner, Timeline, male_detection
 from .config import Config
 from .detection import Box, Detector, decide
 from .imaging import apply_censor
@@ -71,6 +72,8 @@ class Job:
     duration: float | None = None
     seconds_done: float = 0.0
     frames_censored: int = 0
+    # Video time judged to be in a male stretch (video_attribution).
+    seconds_male: float = 0.0
     created: float = field(default_factory=time.time)
     # Last time a page asked about this job (status, stream, start), and
     # last time it said the video was wanted now (playing or being prepared
@@ -93,6 +96,7 @@ class Job:
             "duration": self.duration,
             "seconds_done": round(self.seconds_done, 1),
             "frames_censored": self.frames_censored,
+            "seconds_male": round(self.seconds_male, 1),
         }
 
     def touch(self, active: bool = False) -> None:
@@ -144,6 +148,7 @@ class VideoJobs:
             if _OUTPUT_NAME.fullmatch(f.name):
                 f.unlink(missing_ok=True)
         self._detector = detector
+        self._attribution_detector: Detector | None = None
         self._detector_lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -159,6 +164,18 @@ class VideoJobs:
                 self._detector = Detector(replace(self.cfg.model, path=v.model_path,
                                                   resolution=v.model_resolution, tiling=v.tiling))
             return self._detector
+
+    @property
+    def attribution_detector(self) -> Detector | None:
+        """The video_attribution model, or None while attribution is off."""
+        a = self.cfg.video_attribution
+        if not a.enabled:
+            return None
+        with self._detector_lock:
+            if self._attribution_detector is None:
+                self._attribution_detector = Detector(replace(
+                    self.cfg.model, path=a.model_path, resolution=a.model_resolution, tiling=a.tiling))
+            return self._attribution_detector
 
     def get(self, id_: str) -> Job | None:
         with self._lock:
@@ -177,6 +194,11 @@ class VideoJobs:
             if (old.model, old.video.model_path, old.video.model_resolution, old.video.tiling) != \
                     (new.model, new.video.model_path, new.video.model_resolution, new.video.tiling):
                 self._detector = None
+            if (old.model, old.video_attribution.model_path, old.video_attribution.model_resolution,
+                    old.video_attribution.tiling) != \
+                    (new.model, new.video_attribution.model_path,
+                     new.video_attribution.model_resolution, new.video_attribution.tiling):
+                self._attribution_detector = None
             self.cfg = cfg
 
     def active(self) -> int:
@@ -255,10 +277,10 @@ class VideoJobs:
                     raise VideoError(reason)
                 self._evict()
                 job.update(state="running")
-                censor_video(job, self.cfg, self.detector)
+                censor_video(job, self.cfg, self.detector, self.attribution_detector)
                 job.update(state="done", finished=time.time())
-                log.info("video done %s: %.0fs, %d frames censored", job.id, job.seconds_done,
-                         job.frames_censored)
+                log.info("video done %s: %.0fs, %d frames censored, %.0fs male", job.id,
+                         job.seconds_done, job.frames_censored, job.seconds_male)
             except Exception as e:
                 self._fail(job, str(e) or type(e).__name__)
         finally:
@@ -364,7 +386,11 @@ def output_size(p: Probe, max_height: int) -> tuple[int, int]:
     return w - w % 2, h - h % 2
 
 
-def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
+def censor_video(job: Job, cfg: Config, detector: Detector,
+                 attribution_detector: Detector | None = None) -> None:
+    """Censor job.src into job.path. With an attribution detector (and
+    video_attribution on), a second decode at its sample rate decides which
+    stretches are male; see attribution.py."""
     vcfg = cfg.video
     p = probe(job, vcfg.source_protocols)
     if p.duration and p.duration > vcfg.max_duration_seconds:
@@ -392,11 +418,20 @@ def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
                    "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
                    "-f", "mp4", str(job.path)]
 
+    scanner = None
+    acfg = cfg.video_attribution
+    if attribution_detector and acfg.enabled:
+        scan_cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", *net, "-i", job.src,
+                    "-map", f"0:{p.video_index}", "-vf", f"fps={acfg.sample_fps:.6g},scale={w}:{h}",
+                    "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
+        scanner = Scanner(scan_cmd, w, h, acfg, attribution_detector, name=f"attrib-{job.id[:8]}")
+
     with tempfile.TemporaryFile() as dec_err, tempfile.TemporaryFile() as enc_err:
+        timeline = scanner.start() if scanner else None
         dec = subprocess.Popen(decode_cmd, stdout=subprocess.PIPE, stderr=dec_err)
         enc = subprocess.Popen(encode_cmd, stdin=subprocess.PIPE, stderr=enc_err)
         try:
-            _pump(dec.stdout, enc.stdin, w, h, frame_bytes, fps, step, job, cfg, detector)
+            _pump(dec.stdout, enc.stdin, w, h, frame_bytes, fps, step, job, cfg, detector, timeline)
         except BaseException:
             # Cancelled or failed: the encoder would otherwise keep reading
             # the audio input from the network before it noticed.
@@ -404,6 +439,8 @@ def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
                 proc.kill()
             raise
         finally:
+            if scanner:
+                scanner.stop()
             dec.stdout.close()
             for proc in (dec, enc):
                 if proc.stdin:
@@ -420,13 +457,33 @@ def censor_video(job: Job, cfg: Config, detector: Detector) -> None:
             raise VideoError(f"encode failed: {enc_err.read().decode(errors='replace').strip()[:300]}")
 
 
-def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detector: Detector) -> None:
+def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detector: Detector,
+          timeline: Timeline | None = None) -> None:
     """Read raw frames, censor, write raw frames. Frames between samples wait
-    in `pending` until the next sample's boxes are known."""
+    in `pending` until the next sample's boxes are known. With a timeline,
+    each sample first waits for the attribution scan to get far enough ahead,
+    and male stretches use the male detection config."""
     pad = cfg.video.padding
+    acfg = cfg.video_attribution
+    male_cfg = male_detection(cfg.detection, acfg)
     pending: list[np.ndarray] = []
     prev_boxes: list[Box] = []
     index = written = failures = 0
+    was_male = scan_failed = False
+
+    def attributed_male(t: float) -> bool:
+        nonlocal was_male, scan_failed
+        while not timeline.wait(t + acfg.lookahead_seconds, 0.5):
+            if reason := job.stop_reason(cfg.video.abandon_seconds):
+                raise VideoError(reason)
+        if timeline.failed and not scan_failed:
+            scan_failed = True
+            log.warning("video %s: attribution off from %.1fs: %s", job.id, t, timeline.failed)
+        male = timeline.male_at(t)
+        if male != was_male:
+            log.debug("video %s: %s from %.1fs", job.id, "male stretch" if male else "unattributed", t)
+            was_male = male
+        return male
 
     def flush(frames: list[np.ndarray], boxes: list[Box]) -> None:
         nonlocal written
@@ -448,10 +505,14 @@ def _pump(src, dst, w, h, frame_bytes, fps, step, job: Job, cfg: Config, detecto
         if index % step:
             pending.append(frame)
         else:
+            detection = cfg.detection
+            if timeline and attributed_male(index / fps):
+                detection = male_cfg
+                job.update(seconds_male=job.seconds_male + step / fps)
             try:
                 bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 boxes = [d.detection.box.padded(pad, w, h)
-                         for d in decide(detector.detect(bgr), cfg.detection) if d.censor]
+                         for d in decide(detector.detect(bgr), detection) if d.censor]
                 failures = 0
             except Exception as e:
                 failures += 1

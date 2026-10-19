@@ -75,8 +75,13 @@ Last updated Oct 18, 2026.
   male breast score under 0.26) in half the samples. Per-frame rules can't
   fix it: a penis or male face is in frame in only ~5% (320n) / ~35% (640m)
   of those samples, and 200 of 1,244 censored-breast images in the browsing
-  log also show a penis. Next: video-level (rolling-window) attribution;
-  see `docs/handoff-video-attribution.md`
+  log also show a penis. Video-level attribution (`video_attribution`, see
+  `decisions.md`) is built and tested, and replayed on that video (813
+  censored samples to 188, or 12 at a 0.45 female threshold), but ships
+  off: it needs straight videos with women (must stay censored) and other
+  male-subject videos (must pass) dumped with `tools/dump_video_scores.py`
+  and replayed with `tools/replay_attribution.py` before it is turned on.
+  Not yet tried in the live proxy
 
 - **Security warning**: tell the user that video injection extends every
   page's CSP and lets pages ask the proxy to fetch public video URLs (now
